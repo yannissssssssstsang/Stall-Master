@@ -59,9 +59,9 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, isSyncing, las
         <div className="pt-6 border-t border-slate-100 space-y-4">
           <div className="flex items-center justify-between px-3">
              <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
-               {isOnline ? 'Cloud Active' : 'Offline'}
+               {isSyncing ? 'Syncing...' : (isOnline ? 'Cloud Active' : 'Offline')}
              </span>
-             <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`}></div>
+             <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 sync-pulse' : (isOnline ? 'bg-green-500' : 'bg-amber-500 animate-pulse')}`}></div>
           </div>
           <button 
             onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
@@ -73,10 +73,14 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, isSyncing, las
       </aside>
 
       {/* Mobile Header */}
-      <header className={`md:hidden text-white p-4 flex justify-between items-center shrink-0 z-50 shadow-md ${isOnline ? 'bg-blue-600' : 'bg-slate-800'}`}>
+      <header className={`md:hidden text-white p-4 flex justify-between items-center shrink-0 z-50 shadow-md ${isSyncing ? 'bg-blue-500' : (isOnline ? 'bg-blue-600' : 'bg-slate-800')}`}>
         <div className="flex items-center gap-3">
            <h1 className="text-xl font-bold tracking-tight">{t.appName}</h1>
-           {!isOnline && <span className="text-[10px] bg-amber-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Offline</span>}
+           {isSyncing ? (
+             <i className="fas fa-sync fa-spin text-[10px]"></i>
+           ) : !isOnline && (
+             <span className="text-[10px] bg-amber-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Offline</span>
+           )}
         </div>
         <button 
           onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}

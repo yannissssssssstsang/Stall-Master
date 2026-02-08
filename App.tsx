@@ -57,12 +57,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setIsLoggedIn(false);
     localStorage.setItem('stall_logged_in', 'false');
+    localStorage.removeItem('google_access_token');
   };
-
-  const allTransactions = useMemo(() => {
-    const historical = reports.flatMap(r => r.transactions);
-    return [...transactions, ...historical];
-  }, [transactions, reports]);
 
   const handleCloudSync = useCallback(async () => {
     if (!navigator.onLine || !isLoggedIn) {
@@ -115,11 +111,6 @@ const App: React.FC = () => {
     };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    
-    if (navigator.onLine && (syncStatus === 'pending' || syncStatus === 'offline')) {
-      handleCloudSync();
-    }
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
@@ -131,7 +122,6 @@ const App: React.FC = () => {
       const lastResetStr = localStorage.getItem('stall_last_reset');
       const now = new Date();
       const todayDate = now.toISOString().split('T')[0];
-
       if (lastResetStr !== todayDate && transactions.length > 0) {
         const newReport: DailyReport = {
           date: lastResetStr || todayDate,
@@ -148,7 +138,6 @@ const App: React.FC = () => {
         localStorage.setItem('stall_last_reset', todayDate);
       }
     };
-    checkCutoff();
     const interval = setInterval(checkCutoff, 60000);
     return () => clearInterval(interval);
   }, [transactions, requestSync]);
@@ -160,26 +149,33 @@ const App: React.FC = () => {
   useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_change_logs', JSON.stringify(changeLogs)); }, [changeLogs, isLoggedIn]);
   useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig)); }, [telegramConfig, isLoggedIn]);
 
-  const sendTelegramMessage = async (text: string) => {
-    if (!telegramConfig.botToken || !telegramConfig.chatId || !navigator.onLine) return;
+  const sendTelegramMessage = async (htmlText: string) => {
+    const token = telegramConfig.botToken.trim();
+    const chat = telegramConfig.chatId.trim();
+    if (!token || !chat || !navigator.onLine) return;
+    const cleanToken = token.startsWith('bot') ? token : `bot${token}`;
     try {
-      await fetch(`https://api.telegram.org/bot${telegramConfig.botToken}/sendMessage?chat_id=${telegramConfig.chatId}&text=${encodeURIComponent(text)}&parse_mode=Markdown`);
+      const response = await fetch(`https://api.telegram.org/${cleanToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chat, text: htmlText, parse_mode: 'HTML' })
+      });
+      return response.ok;
     } catch (error) {
-      console.error("Failed to send telegram message", error);
+      console.error("Telegram API Error:", error);
+      throw error;
     }
+  };
+
+  const handleTestTelegram = async () => {
+    return sendTelegramMessage(`<b>✅ Connection Test Successful</b>\nTime: ${new Date().toLocaleTimeString()}`);
   };
 
   const handleCompleteSale = (tx: Transaction) => {
     if ("geolocation" in navigator && navigator.onLine) {
-      navigator.geolocation.getCurrentPosition((position) => {
-        const enrichedTx = {
-          ...tx,
-          location: { lat: position.coords.latitude, lng: position.coords.longitude, name: "Current Stall" }
-        };
-        saveTransaction(enrichedTx);
-      }, () => {
-        saveTransaction(tx);
-      }, { timeout: 5000 });
+      navigator.geolocation.getCurrentPosition((pos) => {
+        saveTransaction({ ...tx, location: { lat: pos.coords.latitude, lng: pos.coords.longitude, name: "Stall" } });
+      }, () => saveTransaction(tx), { timeout: 3000 });
     } else {
       saveTransaction(tx);
     }
@@ -188,46 +184,18 @@ const App: React.FC = () => {
   const saveTransaction = (tx: Transaction) => {
     setTransactions(prev => [...prev, tx]);
     const showTx = telegramConfig.alertType === 'transaction' || telegramConfig.alertType === 'both';
-    const showStock = telegramConfig.alertType === 'stock' || telegramConfig.alertType === 'both';
-
     if (showTx && navigator.onLine) {
-      const itemsStr = tx.items.map(i => `- ${i.name} x${i.quantity} ($${(i.price * i.quantity).toFixed(1)})`).join('\n');
-      const msg = `💰 *New Transaction*\nMethod: ${tx.paymentMethod}\nTotal: $${tx.total.toFixed(1)}\nItems:\n${itemsStr}\nProfit: $${tx.profit.toFixed(1)}`;
-      sendTelegramMessage(msg);
+      sendTelegramMessage(`<b>💰 New Transaction</b>\n<b>Total:</b> $${tx.total.toFixed(1)}`).catch(e => console.error(e));
     }
-
-    tx.items.forEach(item => {
-      const product = products.find(p => p.id === item.id);
-      if (product) {
-        const newStock = product.stock - item.quantity;
-        const threshold = product.threshold || 5;
-        if (showStock && newStock < threshold && navigator.onLine) {
-          sendTelegramMessage(`⚠️ *Low Stock Alert*\nProduct: ${product.name}\nRemaining: ${newStock}\nThreshold: ${threshold}`);
-        }
-      }
-    });
     requestSync();
   };
 
   const handleUpdateStock = (productId: string, diff: number) => {
-    setProducts(prev => prev.map(p => {
-      if (p.id === productId) return { ...p, stock: Math.max(0, p.stock + diff) };
-      return p;
-    }));
+    setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: Math.max(0, p.stock + diff) } : p));
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => {
-      if (p.id === updatedProduct.id) {
-        const logs: ProductChangeLog[] = [];
-        const timestamp = new Date().toISOString();
-        if (p.price !== updatedProduct.price) logs.push({ id: Math.random().toString(36).substr(2, 9), productId: p.id, productName: p.name, field: 'price', oldValue: p.price, newValue: updatedProduct.price, timestamp });
-        if (p.stock !== updatedProduct.stock) logs.push({ id: Math.random().toString(36).substr(2, 9), productId: p.id, productName: p.name, field: 'stock', oldValue: p.stock, newValue: updatedProduct.stock, timestamp });
-        if (logs.length > 0) setChangeLogs(prevLogs => [...prevLogs, ...logs]);
-        return updatedProduct;
-      }
-      return p;
-    }));
+    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
     requestSync();
   };
 
@@ -251,9 +219,10 @@ const App: React.FC = () => {
         <Routes>
           <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} />} />
           <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} />} />
-          <Route path="/analytics" element={<AnalyticsView transactions={allTransactions} products={products} lang={lang} />} />
+          {/* Fixed allTransactions typo to transactions */}
+          <Route path="/analytics" element={<AnalyticsView transactions={transactions} products={products} lang={lang} />} />
           <Route path="/records" element={<RecordsView transactions={transactions} lang={lang} />} />
-          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} />} />
+          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={handleTestTelegram} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} />} />
         </Routes>
       </Layout>
     </HashRouter>

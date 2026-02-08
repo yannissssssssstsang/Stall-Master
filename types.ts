@@ -23,6 +23,7 @@ export interface Product {
   threshold?: number;
   image?: string;
   category: string;
+  isExtracting?: boolean; // New: Tracks background AI extraction
 }
 
 export interface ProductChangeLog {
