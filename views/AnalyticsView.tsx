@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { Transaction, Language, Product } from '../types';
 import { TRANSLATIONS } from '../constants';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, AreaChart, Area } from 'recharts';
@@ -12,17 +12,38 @@ interface AnalyticsViewProps {
   lang: Language;
 }
 
-const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, products }) => {
-  const t = TRANSLATIONS[lang];
-  const mapRef = useRef<any>(null);
+type DateRange = 'today' | 'all';
 
-  const totalRevenue = transactions.reduce((acc, curr) => acc + curr.total, 0);
-  const totalProfit = transactions.reduce((acc, curr) => acc + curr.profit, 0);
+const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, products }) => {
+  const t = TRANSLATIONS[lang] as any;
+  const mapRef = useRef<any>(null);
+  const [range, setRange] = useState<DateRange>('today');
+
+  // Filtering transactions based on range
+  const filteredTransactions = useMemo(() => {
+    if (range === 'all') return transactions;
+    
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    
+    return transactions.filter(tx => new Date(tx.timestamp).getTime() >= startOfToday);
+  }, [transactions, range]);
+
+  const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.total, 0);
+  const totalProfit = filteredTransactions.reduce((acc, curr) => acc + curr.profit, 0);
+
+  // New Customers calculation (unique emails)
+  const newCustomersCount = useMemo(() => {
+    const emails = filteredTransactions
+      .map(tx => tx.customerEmail)
+      .filter(email => email && email.trim() !== '');
+    return new Set(emails).size;
+  }, [filteredTransactions]);
 
   // Group transactions by location for the proportional symbol map
   const locationStats = useMemo(() => {
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
-    transactions.forEach(tx => {
+    filteredTransactions.forEach(tx => {
       if (tx.location) {
         // Rounding to 4 decimal places roughly groups points within ~11 meters
         const key = `${tx.location.lat.toFixed(4)},${tx.location.lng.toFixed(4)}`;
@@ -40,7 +61,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       }
     });
     return Object.values(stats);
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   const maxRevenue = useMemo(() => {
     return Math.max(...locationStats.map(s => s.revenue), 1);
@@ -48,19 +69,20 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
 
   const hourlyData = useMemo(() => {
     const map: Record<number, number> = {};
-    transactions.forEach(tx => {
+    filteredTransactions.forEach(tx => {
       const hour = new Date(tx.timestamp).getHours();
       map[hour] = (map[hour] || 0) + tx.total;
     });
+    // Returning all 24 hours from 00:00 to 23:00
     return Array.from({ length: 24 }, (_, i) => ({
-      hour: `${i}:00`,
+      hour: `${i.toString().padStart(2, '0')}:00`,
       amount: map[i] || 0
-    })).filter((d, i) => d.amount > 0 || (i >= 9 && i <= 21));
-  }, [transactions]);
+    }));
+  }, [filteredTransactions]);
 
   const bestSellers = useMemo(() => {
     const productSalesMap: Record<string, number> = {};
-    transactions.forEach(tx => {
+    filteredTransactions.forEach(tx => {
       tx.items.forEach(item => {
         productSalesMap[item.name] = (productSalesMap[item.name] || 0) + item.quantity;
       });
@@ -69,7 +91,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -93,8 +115,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       });
 
       locationStats.forEach(stat => {
-        // Calculate radius: base 5px + relative to revenue sqrt (area scaling)
-        // Max radius around 35px
+        // Calculate radius: base 6px + relative to revenue sqrt (area scaling)
         const radius = 6 + (Math.sqrt(stat.revenue / maxRevenue) * 30);
         
         const bubble = L.circleMarker([stat.lat, stat.lng], {
@@ -116,7 +137,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           </div>
         `, { closeButton: false, className: 'custom-map-popup' });
 
-        // Hover effect
         bubble.on('mouseover', function (e: any) {
           this.setStyle({ fillOpacity: 0.9, weight: 3, fillColor: '#2563eb' });
           this.openPopup();
@@ -125,15 +145,14 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           this.setStyle({ fillOpacity: 0.7, weight: 2, fillColor: '#3b82f6' });
         });
       });
-    }
 
-    return () => { 
-      if (mapRef.current) { 
-        mapRef.current.remove(); 
-        mapRef.current = null; 
-      } 
-    };
-  }, [locationStats, maxRevenue]);
+      // Fit bounds if there are markers and "All" is selected to see everything
+      if (locationStats.length > 0 && range === 'all') {
+        const group = new L.featureGroup(locationStats.map(s => L.marker([s.lat, s.lng])));
+        mapRef.current.fitBounds(group.getBounds().pad(0.5));
+      }
+    }
+  }, [locationStats, maxRevenue, range]);
 
   return (
     <div className="space-y-8 pb-20 md:pb-12">
@@ -143,18 +162,21 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <h2 className="text-2xl md:text-3xl font-black text-slate-800">{t.analytics}</h2>
           <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Stall Performance & Spatial Data</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="flex -space-x-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-slate-200 overflow-hidden shadow-sm">
-                <img src={`https://picsum.photos/seed/user${i}/100`} className="w-full h-full object-cover" />
-              </div>
-            ))}
-          </div>
-          <div className="bg-white p-2 px-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Global Analytics Active</span>
-          </div>
+        
+        {/* Date Range Selector Bar */}
+        <div className="bg-white p-1.5 rounded-[20px] border border-slate-100 shadow-sm flex items-center gap-1">
+          <button 
+            onClick={() => setRange('today')}
+            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'today' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            {lang === Language.ZH ? '今日' : 'Today'}
+          </button>
+          <button 
+            onClick={() => setRange('all')}
+            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'all' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            {lang === Language.ZH ? '全部' : 'All Time'}
+          </button>
         </div>
       </div>
 
@@ -165,8 +187,8 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <div>
             <p className="text-3xl font-black">${totalRevenue.toLocaleString()}</p>
             <div className="flex items-center gap-1 mt-1 text-white/70 text-[10px] font-bold uppercase">
-              <i className="fas fa-arrow-trend-up"></i>
-              <span>+12.5% vs yesterday</span>
+              <i className="fas fa-chart-line"></i>
+              <span>{range === 'today' ? 'Real-time sync' : 'Historical Total'}</span>
             </div>
           </div>
         </div>
@@ -174,22 +196,22 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.profit}</p>
           <div>
             <p className="text-3xl font-black text-slate-800">${totalProfit.toLocaleString()}</p>
-            <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">Target: $5,000</p>
+            <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">Margin: {totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) : 0}%</p>
           </div>
         </div>
         <div className="dashboard-card p-6 flex flex-col justify-between">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Sales</p>
           <div>
-            <p className="text-3xl font-black text-slate-800">{transactions.length}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Avg: ${(totalRevenue / Math.max(transactions.length, 1)).toFixed(1)}/tx</p>
+            <p className="text-3xl font-black text-slate-800">{filteredTransactions.length}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Confirmed Transactions</p>
           </div>
         </div>
         <div className="dashboard-card p-6 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Margin %</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.newCustomers}</p>
           <div>
-            <p className="text-3xl font-black text-blue-600">{totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(0) : 0}%</p>
+            <p className="text-3xl font-black text-blue-600">{newCustomersCount}</p>
             <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
-               <div className="bg-blue-600 h-full rounded-full" style={{ width: `${totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0}%` }}></div>
+               <div className="bg-blue-600 h-full rounded-full" style={{ width: `${Math.min(100, (newCustomersCount / Math.max(1, filteredTransactions.length)) * 100)}%` }}></div>
             </div>
           </div>
         </div>
@@ -213,25 +235,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           </div>
           <div className="flex-1 min-h-0 relative">
             <div id="analytics-map" className="h-full w-full grayscale-[0.2] contrast-[1.1]"></div>
-            
-            {/* Map Legend Overlay */}
-            <div className="absolute top-4 left-4 z-[400] bg-white/90 backdrop-blur-sm p-4 rounded-2xl border border-slate-100 shadow-xl pointer-events-none space-y-3">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Revenue Scale</p>
-              <div className="flex items-end gap-3 px-1">
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                  <span className="text-[8px] font-bold text-slate-400">$</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-4 h-4 rounded-full bg-blue-500"></div>
-                  <span className="text-[8px] font-bold text-slate-400">$$</span>
-                </div>
-                <div className="flex flex-col items-center gap-1">
-                  <div className="w-8 h-8 rounded-full bg-blue-500"></div>
-                  <span className="text-[8px] font-bold text-slate-400">$$$</span>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -284,7 +287,9 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <div className="flex justify-between items-center mb-8 shrink-0">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Revenue Velocity</h3>
-              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Real-time hourly breakdown</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
+                {range === 'today' ? 'Real-time hourly breakdown' : 'Historical aggregate by hour'} (00:00 - 23:00)
+              </p>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">

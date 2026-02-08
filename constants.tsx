@@ -23,9 +23,9 @@ export const TRANSLATIONS = {
     profit: 'Profit',
     revenue: 'Revenue',
     stockLevel: 'Stock Level',
-    aiScan: 'AI Scan Inventory',
+    aiScan: 'Smart Scan Inventory',
     uploadPhoto: 'Upload Label/Invoice',
-    extracting: 'AI Extracting Details...',
+    extracting: 'Extracting Details...',
     noProducts: 'No products in stock.',
     stockOutAlert: 'Stock Low Alert!',
     bestSellers: 'Best Selling Items',
@@ -46,7 +46,9 @@ export const TRANSLATIONS = {
     notifNone: 'No Notifications',
     notifTransaction: 'Detailed Transaction Records',
     notifStock: 'Stock Less Than Threshold (Low Stock)',
-    notifBoth: 'Both Records & Stock Alerts'
+    notifBoth: 'Both Records & Stock Alerts',
+    transactionCount: 'Total Transactions',
+    newCustomers: 'New Customers'
   },
   [Language.ZH]: {
     appName: '市集管家',
@@ -68,9 +70,9 @@ export const TRANSLATIONS = {
     profit: '利潤',
     revenue: '營業額',
     stockLevel: '庫存水平',
-    aiScan: 'AI 掃描入庫',
+    aiScan: '智能掃描入庫',
     uploadPhoto: '上傳標籤/發票',
-    extracting: 'AI 正在提取信息...',
+    extracting: '正在提取信息...',
     noProducts: '目前沒有庫存。',
     stockOutAlert: '庫存不足警報！',
     bestSellers: '暢銷產品',
@@ -91,7 +93,9 @@ export const TRANSLATIONS = {
     notifNone: '關閉所有通知',
     notifTransaction: '每一筆詳細交易記錄',
     notifStock: '庫存低於預警值 (15% 警報)',
-    notifBoth: '交易記錄及庫存警報'
+    notifBoth: '交易記錄及庫存警報',
+    transactionCount: '交易總數',
+    newCustomers: '新客數量'
   }
 };
 

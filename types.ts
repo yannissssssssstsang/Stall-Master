@@ -11,6 +11,9 @@ export enum PaymentMethod {
   FPS = 'FPS'
 }
 
+// Added SyncStatus type to track cloud synchronization state
+export type SyncStatus = 'synced' | 'syncing' | 'error' | 'pending' | 'offline';
+
 export interface Product {
   id: string;
   name: string;
@@ -43,6 +46,7 @@ export interface Transaction {
   total: number;
   paymentMethod: PaymentMethod;
   profit: number;
+  customerEmail?: string;
   location?: {
     lat: number;
     lng: number;

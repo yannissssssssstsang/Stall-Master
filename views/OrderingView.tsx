@@ -21,6 +21,22 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   const [showReceiptChoice, setShowReceiptChoice] = useState(false);
   const [showEmailInput, setShowEmailInput] = useState(false);
   const [customerEmail, setCustomerEmail] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const validateEmail = (email: string) => {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCustomerEmail(val);
+    if (val && !validateEmail(val)) {
+      setEmailError(lang === Language.ZH ? '請輸入有效的電子郵件地址' : 'Please enter a valid email address');
+    } else {
+      setEmailError(null);
+    }
+  };
 
   const toggleCategory = (category: string) => {
     setCollapsedCategories(prev => ({
@@ -50,22 +66,35 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   };
 
   const finalizeTransaction = (emailSent: boolean = false) => {
+    if (emailSent && !validateEmail(customerEmail)) {
+      setEmailError(lang === Language.ZH ? '請先修正電子郵件' : 'Please fix the email address first');
+      return;
+    }
+
     const transaction: Transaction = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
       items: [...cart],
       total: cartTotal,
       paymentMethod: selectedPayment!,
-      profit: cartProfit
+      profit: cartProfit,
+      customerEmail: (emailSent && customerEmail) ? customerEmail : undefined
     };
+    
+    if (emailSent && customerEmail) {
+      console.log(`Sending digital receipt to: ${customerEmail}`);
+    }
+
     onCompleteSale(transaction);
     cart.forEach(item => updateStock(item.id, -item.quantity));
+    
     setCart([]);
     setIsCheckoutOpen(false);
     setSelectedPayment(null);
     setShowReceiptChoice(false);
     setShowEmailInput(false);
     setCustomerEmail('');
+    setEmailError(null);
   };
 
   const handleCloseModal = () => {
@@ -74,6 +103,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
     setShowReceiptChoice(false);
     setShowEmailInput(false);
     setCustomerEmail('');
+    setEmailError(null);
   };
 
   const getQuantityInCart = (productId: string) => {
@@ -266,28 +296,72 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
             {showReceiptChoice && (
               <div className="text-center py-10 px-4 space-y-6">
-                <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-white shadow-xl">
-                  <i className="fas fa-check text-4xl"></i>
-                </div>
-                <div>
-                  <h3 className="text-3xl font-black text-slate-800">Success!</h3>
-                  <p className="text-slate-500 font-bold mt-2">Transaction completed smoothly</p>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-sm mx-auto pt-4">
-                  <button 
-                    onClick={() => finalizeTransaction(false)}
-                    className="py-4 rounded-2xl bg-slate-100 font-bold text-slate-600 hover:bg-slate-200 transition-colors"
-                  >
-                    No Receipt
-                  </button>
-                  <button 
-                    onClick={() => setShowEmailInput(true)}
-                    className="py-4 rounded-2xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Send Receipt
-                  </button>
-                </div>
+                {!showEmailInput ? (
+                  <>
+                    <div className="w-24 h-24 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-white shadow-xl">
+                      <i className="fas fa-check text-4xl"></i>
+                    </div>
+                    <div>
+                      <h3 className="text-3xl font-black text-slate-800">Success!</h3>
+                      <p className="text-slate-500 font-bold mt-2">Transaction completed smoothly</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-sm mx-auto pt-4">
+                      <button 
+                        onClick={() => finalizeTransaction(false)}
+                        className="py-4 rounded-2xl bg-slate-100 font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+                      >
+                        No Receipt
+                      </button>
+                      <button 
+                        onClick={() => setShowEmailInput(true)}
+                        className="py-4 rounded-2xl bg-blue-600 text-white font-bold shadow-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Send Receipt
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-left animate-scale-in">
+                    <div className="flex items-center gap-4 mb-8">
+                      <button 
+                        onClick={() => { setShowEmailInput(false); setEmailError(null); }}
+                        className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"
+                      >
+                        <i className="fas fa-arrow-left"></i>
+                      </button>
+                      <h3 className="text-2xl font-black text-slate-800">Enter Email</h3>
+                    </div>
+                    
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2 ml-1">Customer Email</label>
+                        <input 
+                          type="email"
+                          value={customerEmail}
+                          onChange={handleEmailChange}
+                          placeholder="name@example.com"
+                          className={`w-full p-5 bg-slate-50 border ${emailError ? 'border-red-500 bg-red-50' : 'border-slate-200'} rounded-2xl text-lg font-bold outline-none focus:border-blue-500 transition-colors`}
+                          autoFocus
+                        />
+                        {emailError && (
+                          <p className="text-xs text-red-500 font-bold mt-2 ml-1 animate-scale-in">
+                            <i className="fas fa-circle-exclamation mr-1"></i>
+                            {emailError}
+                          </p>
+                        )}
+                      </div>
+                      
+                      <button 
+                        onClick={() => finalizeTransaction(true)}
+                        disabled={!validateEmail(customerEmail)}
+                        className={`w-full py-5 rounded-2xl font-black text-lg transition-all ${validateEmail(customerEmail) ? 'bg-blue-600 text-white shadow-xl shadow-blue-100 hover:bg-blue-700 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                      >
+                        Finish & Send Receipt
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
