@@ -97,11 +97,10 @@ const Layout: React.FC<LayoutProps> = ({
            )}
         </div>
         <div className="flex items-center gap-2">
-          {/* ENERGY SAVING TOGGLE replacing top-right logout */}
+          {/* ENERGY SAVING TOGGLE replacing logout */}
           <button 
             onClick={onToggleEnergySaving}
-            title="Toggle Energy Saving Mode"
-            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center transition-all border ${isEnergySaving ? 'bg-emerald-900/40 text-emerald-400 border-emerald-500/30 shadow-none' : 'bg-white/20 text-white border-transparent'}`}
+            className={`w-12 h-10 rounded-xl flex flex-col items-center justify-center transition-all border ${isEnergySaving ? 'bg-emerald-900/40 text-emerald-400 border-emerald-500/30' : 'bg-white/20 text-white border-transparent'}`}
           >
             <i className={`fas ${isEnergySaving ? 'fa-battery-full' : 'fa-battery-half'} text-[10px]`}></i>
             <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">{isEnergySaving ? 'ECO' : 'SAVE'}</span>

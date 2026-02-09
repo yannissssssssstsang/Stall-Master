@@ -13,7 +13,8 @@ import { syncToGoogleDrive } from './services/googleDriveService';
 
 declare const google: any;
 
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+// PASTE YOUR CLIENT ID FROM GOOGLE CLOUD CONSOLE HERE
+const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
 
 const INITIAL_PRODUCTS: Product[] = [
   { id: '1', name: 'Artisan Coffee', price: 45, cost: 15, stock: 50, threshold: 5, category: 'Beverage', image: 'https://picsum.photos/seed/coffee/200' },
@@ -71,11 +72,11 @@ const App: React.FC = () => {
                 localStorage.setItem('stall_logged_in', 'true');
               }
             },
-            error_callback: (err: any) => console.error("Token Client Error:", err)
+            error_callback: (err: any) => console.error("GSI Error:", err)
           });
           setTokenClient(client);
         } catch (err) {
-          console.error("GSI Initialization Error:", err);
+          console.error("GSI Init Error:", err);
         }
       }
     };
@@ -84,7 +85,7 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = () => {
-    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_GOOGLE')) tokenClient.requestAccessToken();
+    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_CLIENT')) tokenClient.requestAccessToken();
     else {
       setIsLoggedIn(true);
       localStorage.setItem('stall_logged_in', 'true');
@@ -132,57 +133,19 @@ const App: React.FC = () => {
   }, [products, transactions, reports, lang, telegramConfig, paymentQRCodes, isLoggedIn]);
 
   const requestSync = useCallback(() => {
-    if (!navigator.onLine) setSyncStatus('pending');
-    else handleCloudSync();
+    if (navigator.onLine) handleCloudSync();
+    else setSyncStatus('pending');
   }, [handleCloudSync]);
 
   useEffect(() => {
-    const handleOnline = () => { setIsOnline(true); if (syncStatus === 'pending' || syncStatus === 'offline' || syncStatus === 'error') handleCloudSync(); };
+    const handleOnline = () => { setIsOnline(true); handleCloudSync(); };
     const handleOffline = () => { setIsOnline(false); setSyncStatus('offline'); };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
-  }, [handleCloudSync, syncStatus]);
-
-  useEffect(() => {
-    const checkCutoff = () => {
-      const lastResetStr = localStorage.getItem('stall_last_reset');
-      const now = new Date();
-      const todayDate = now.toISOString().split('T')[0];
-      if (lastResetStr !== todayDate && transactions.length > 0) {
-        const newReport: DailyReport = {
-          date: lastResetStr || todayDate,
-          transactions: [...transactions],
-          totalRevenue: transactions.reduce((a, b) => a + b.total, 0),
-          totalProfit: transactions.reduce((a, b) => a + b.profit, 0)
-        };
-        setReports(prev => [...prev, newReport]);
-        setTransactions([]);
-        localStorage.setItem('stall_last_reset', todayDate);
-        localStorage.setItem('stall_transactions', JSON.stringify([]));
-        requestSync();
-      } else if (!lastResetStr) localStorage.setItem('stall_last_reset', todayDate);
-    };
-    const interval = setInterval(checkCutoff, 60000);
-    return () => clearInterval(interval);
-  }, [transactions, requestSync]);
-
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_products', JSON.stringify(products)); }, [products, isLoggedIn]);
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_transactions', JSON.stringify(transactions)); }, [transactions, isLoggedIn]);
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_reports', JSON.stringify(reports)); }, [reports, isLoggedIn]);
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_payment_qrs', JSON.stringify(paymentQRCodes)); }, [paymentQRCodes, isLoggedIn]);
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_change_logs', JSON.stringify(changeLogs)); }, [changeLogs, isLoggedIn]);
-  useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig)); }, [telegramConfig, isLoggedIn]);
+  }, [handleCloudSync]);
 
   const handleCompleteSale = (tx: Transaction) => {
-    if ("geolocation" in navigator && navigator.onLine) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        saveTransaction({ ...tx, location: { lat: pos.coords.latitude, lng: pos.coords.longitude, name: "Stall" } });
-      }, () => saveTransaction(tx), { timeout: 3000 });
-    } else saveTransaction(tx);
-  };
-
-  const saveTransaction = (tx: Transaction) => {
     setTransactions(prev => [...prev, tx]);
     requestSync();
   };
