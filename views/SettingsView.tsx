@@ -29,7 +29,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const t = TRANSLATIONS[lang];
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [activeUploadMethod, setActiveUploadMethod] = React.useState<keyof PaymentQRCodes | null>(null);
+  const [activeUploadMethod, setActiveUploadMethod] = useState<string | null>(null);
   
   // Telegram States
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -38,6 +38,10 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   // Cloud Diagnostic States
   const [diagStatus, setDiagStatus] = useState<ConnectionStatus | null>(null);
   const [isCheckingDiag, setIsCheckingDiag] = useState(false);
+
+  // New Payment Method Modal state
+  const [isAddingNewMethod, setIsAddingNewMethod] = useState(false);
+  const [newMethodName, setNewMethodName] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -50,9 +54,23 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const triggerUpload = (method: keyof PaymentQRCodes) => {
+  const triggerUpload = (method: string) => {
     setActiveUploadMethod(method);
     fileInputRef.current?.click();
+  };
+
+  const removePaymentMethod = (method: string) => {
+    const next = { ...paymentQRCodes };
+    delete next[method];
+    onUpdateQRCodes(next);
+  };
+
+  const addNewMethod = () => {
+    const trimmed = newMethodName.trim().toUpperCase();
+    if (!trimmed) return;
+    onUpdateQRCodes({ ...paymentQRCodes, [trimmed]: undefined });
+    setNewMethodName('');
+    setIsAddingNewMethod(false);
   };
 
   const runTelegramTest = async () => {
@@ -119,13 +137,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
               </p>
             </div>
             <p className="text-xs font-medium text-slate-600">{diagStatus.message}</p>
-            {!diagStatus.ok && (
-              <div className="mt-3 p-3 bg-white/50 rounded-xl text-[10px] font-mono text-slate-400 leading-relaxed">
-                Library: {diagStatus.details?.libraryLoaded ? '✅ Loaded' : '❌ Missing'}<br/>
-                Token: {diagStatus.details?.tokenPresent ? '✅ Present' : '❌ Missing'}<br/>
-                {diagStatus.details?.apiResponse && `Response: ${JSON.stringify(diagStatus.details.apiResponse).slice(0, 100)}...`}
-              </div>
-            )}
           </div>
         )}
 
@@ -141,6 +152,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
+      {/* Telegram Configuration */}
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
         <div className="flex justify-between items-center mb-6">
           <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">{t.telegramSettings}</h3>
@@ -182,21 +194,62 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </div>
 
+      {/* Payment Configuration */}
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
-        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Payment Configuration</h3>
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Payment Methods (QR Only)</h3>
+          <button 
+            onClick={() => setIsAddingNewMethod(true)}
+            className="px-4 py-1.5 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest hover:bg-blue-100 transition-all flex items-center gap-2"
+          >
+            <i className="fas fa-plus"></i>
+            Add New
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 gap-4">
-          {['PAYME', 'ALIPAY', 'FPS'].map((m) => (
-            <div key={m} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl bg-slate-50 group">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm"><i className={`fas ${m === 'PAYME' ? 'fa-qrcode' : m === 'ALIPAY' ? 'fa-mobile-screen' : 'fa-bolt'} text-lg`}></i></div>
-                <div>
-                  <p className="font-black text-slate-800 text-sm">{m}</p>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">{paymentQRCodes[m as keyof PaymentQRCodes] ? 'Custom' : 'Default'}</p>
+          {Object.keys(paymentQRCodes).map((m) => (
+            <div key={m} className="flex flex-col p-4 border border-slate-100 rounded-2xl bg-slate-50 group">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden border border-slate-100">
+                    {paymentQRCodes[m] ? (
+                      <img src={paymentQRCodes[m]} className="w-full h-full object-cover" />
+                    ) : (
+                      <i className={`fas ${m === 'PAYME' ? 'fa-qrcode' : m === 'ALIPAY' ? 'fa-mobile-screen' : m === 'FPS' ? 'fa-bolt' : 'fa-wallet'} text-lg text-slate-300`}></i>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-800 text-sm uppercase tracking-tight">{m}</p>
+                    <p className={`text-[10px] font-bold uppercase ${paymentQRCodes[m] ? 'text-emerald-500' : 'text-red-400'}`}>
+                      {paymentQRCodes[m] ? 'QR Uploaded' : 'No QR - Will not show on ordering'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => triggerUpload(m)} 
+                    className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-[10px] font-black shadow-sm uppercase hover:bg-slate-50"
+                  >
+                    Upload QR
+                  </button>
+                  <button 
+                    onClick={() => removePaymentMethod(m)} 
+                    className="w-10 h-10 bg-white text-red-400 border border-slate-200 rounded-xl flex items-center justify-center shadow-sm hover:text-red-500"
+                  >
+                    <i className="fas fa-trash-can text-xs"></i>
+                  </button>
                 </div>
               </div>
-              <button onClick={() => triggerUpload(m as keyof PaymentQRCodes)} className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-black shadow-sm">Update</button>
             </div>
           ))}
+          
+          {Object.keys(paymentQRCodes).length === 0 && (
+            <div className="text-center py-10 border-2 border-dashed border-slate-100 rounded-2xl">
+              <i className="fas fa-qrcode text-slate-100 text-3xl mb-2"></i>
+              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Digital Payments Configured</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -206,6 +259,27 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           <i className="fas fa-arrow-right-from-bracket group-hover:translate-x-1 transition-transform"></i>
         </button>
       </div>
+
+      {/* Add New Method Modal */}
+      {isAddingNewMethod && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl animate-scale-in">
+            <h3 className="text-lg font-black text-slate-800 mb-4 uppercase tracking-tight">New Payment Method</h3>
+            <input 
+              autoFocus
+              type="text" 
+              value={newMethodName}
+              onChange={e => setNewMethodName(e.target.value)}
+              placeholder="e.g. OCTOPUS, WECHAT"
+              className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-blue-500 mb-4 uppercase"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setIsAddingNewMethod(false)} className="p-4 bg-slate-50 text-slate-500 rounded-2xl text-xs font-black uppercase tracking-widest">Cancel</button>
+              <button onClick={addNewMethod} className="p-4 bg-blue-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-lg shadow-blue-100">Add Method</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
     </div>

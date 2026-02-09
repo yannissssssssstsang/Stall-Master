@@ -8,11 +8,12 @@ interface LayoutProps {
   children: React.ReactNode;
   lang: Language;
   setLang: (l: Language) => void;
+  onLogout: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, isSyncing, lastSyncTime }) => {
+const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, onLogout, isSyncing, lastSyncTime }) => {
   const t = TRANSLATIONS[lang];
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -57,18 +58,20 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, isSyncing, las
         </nav>
 
         <div className="pt-6 border-t border-slate-100 space-y-4">
+          <button 
+            onClick={onLogout}
+            className="w-full bg-red-50 hover:bg-red-100 text-red-600 py-3 rounded-xl font-black transition-colors text-xs uppercase tracking-widest flex items-center justify-center gap-3"
+          >
+            <i className="fas fa-arrow-right-from-bracket"></i>
+            Sign Out
+          </button>
+          
           <div className="flex items-center justify-between px-3">
              <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
                {isSyncing ? 'Syncing...' : (isOnline ? 'Cloud Active' : 'Offline')}
              </span>
              <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 sync-pulse' : (isOnline ? 'bg-green-500' : 'bg-amber-500 animate-pulse')}`}></div>
           </div>
-          <button 
-            onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
-            className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold transition-colors text-sm"
-          >
-            {lang === Language.EN ? '切換為 繁中' : 'Switch to English'}
-          </button>
         </div>
       </aside>
 
@@ -82,12 +85,20 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, isSyncing, las
              <span className="text-[10px] bg-amber-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Offline</span>
            )}
         </div>
-        <button 
-          onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
-          className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-bold transition-colors"
-        >
-          {lang === Language.EN ? '繁中' : 'EN'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={onLogout}
+            className="bg-white/20 hover:bg-white/30 w-8 h-8 rounded-lg flex items-center justify-center text-xs transition-colors"
+          >
+            <i className="fas fa-arrow-right-from-bracket"></i>
+          </button>
+          <button 
+            onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
+            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-bold transition-colors"
+          >
+            {lang === Language.EN ? '繁中' : 'EN'}
+          </button>
+        </div>
       </header>
 
       {/* Main Content */}

@@ -11,7 +11,6 @@ export enum PaymentMethod {
   FPS = 'FPS'
 }
 
-// Added SyncStatus type to track cloud synchronization state
 export type SyncStatus = 'synced' | 'syncing' | 'error' | 'pending' | 'offline';
 
 export interface Product {
@@ -23,7 +22,7 @@ export interface Product {
   threshold?: number;
   image?: string;
   category: string;
-  isExtracting?: boolean; // New: Tracks background AI extraction
+  isExtracting?: boolean;
 }
 
 export interface ProductChangeLog {
@@ -45,7 +44,7 @@ export interface Transaction {
   timestamp: string;
   items: CartItem[];
   total: number;
-  paymentMethod: PaymentMethod;
+  paymentMethod: string; // Changed from enum to string to support custom methods
   profit: number;
   customerEmail?: string;
   location?: {
@@ -70,9 +69,7 @@ export interface AIExtractionResult {
 }
 
 export interface PaymentQRCodes {
-  PAYME?: string;
-  ALIPAY?: string;
-  FPS?: string;
+  [key: string]: string | undefined; // Flexible keys for custom methods
 }
 
 export interface TelegramConfig {

@@ -11,6 +11,8 @@ import LandingView from './views/LandingView';
 import { Product, Language, Transaction, DailyReport, PaymentQRCodes, ProductChangeLog, TelegramConfig, SyncStatus } from './types';
 import { syncToGoogleDrive } from './services/googleDriveService';
 
+declare const google: any;
+
 const INITIAL_PRODUCTS: Product[] = [
   { id: '1', name: 'Artisan Coffee', price: 45, cost: 15, stock: 50, threshold: 5, category: 'Beverage', image: 'https://picsum.photos/seed/coffee/200' },
   { id: '2', name: 'Handmade Cookie', price: 20, cost: 8, stock: 120, threshold: 10, category: 'Food', image: 'https://picsum.photos/seed/cookie/200' },
@@ -49,15 +51,51 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : { botToken: '', chatId: '', alertType: 'both' };
   });
 
+  const [tokenClient, setTokenClient] = useState<any>(null);
+
+  useEffect(() => {
+    // Initialize Google Identity Services
+    const initGsi = () => {
+      if (typeof google !== 'undefined') {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com', // In a real app, this is your ID
+          scope: 'https://www.googleapis.com/auth/drive.file',
+          callback: (tokenResponse: any) => {
+            if (tokenResponse && tokenResponse.access_token) {
+              localStorage.setItem('google_access_token', tokenResponse.access_token);
+              (window as any).google_access_token = tokenResponse.access_token;
+              setIsLoggedIn(true);
+              localStorage.setItem('stall_logged_in', 'true');
+            }
+          },
+        });
+        setTokenClient(client);
+      }
+    };
+
+    if (document.readyState === 'complete') {
+      initGsi();
+    } else {
+      window.addEventListener('load', initGsi);
+      return () => window.removeEventListener('load', initGsi);
+    }
+  }, []);
+
   const handleLogin = () => {
-    setIsLoggedIn(true);
-    localStorage.setItem('stall_logged_in', 'true');
+    if (tokenClient) {
+      tokenClient.requestAccessToken();
+    } else {
+      // Fallback for development/testing environments without a configured Client ID
+      setIsLoggedIn(true);
+      localStorage.setItem('stall_logged_in', 'true');
+    }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
     localStorage.setItem('stall_logged_in', 'false');
     localStorage.removeItem('google_access_token');
+    if ((window as any).google_access_token) delete (window as any).google_access_token;
   };
 
   const handleCloudSync = useCallback(async () => {
@@ -215,11 +253,10 @@ const App: React.FC = () => {
 
   return (
     <HashRouter>
-      <Layout lang={lang} setLang={setLang} isSyncing={syncStatus === 'syncing'} lastSyncTime={lastSyncTime}>
+      <Layout lang={lang} setLang={setLang} onLogout={handleLogout} isSyncing={syncStatus === 'syncing'} lastSyncTime={lastSyncTime}>
         <Routes>
           <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} />} />
           <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} />} />
-          {/* Fixed allTransactions typo to transactions */}
           <Route path="/analytics" element={<AnalyticsView transactions={transactions} products={products} lang={lang} />} />
           <Route path="/records" element={<RecordsView transactions={transactions} lang={lang} />} />
           <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={handleTestTelegram} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} />} />
