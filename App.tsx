@@ -13,6 +13,8 @@ import { syncToGoogleDrive } from './services/googleDriveService';
 
 declare const google: any;
 
+const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+
 const INITIAL_PRODUCTS: Product[] = [
   { id: '1', name: 'Artisan Coffee', price: 45, cost: 15, stock: 50, threshold: 5, category: 'Beverage', image: 'https://picsum.photos/seed/coffee/200' },
   { id: '2', name: 'Handmade Cookie', price: 20, cost: 8, stock: 120, threshold: 10, category: 'Food', image: 'https://picsum.photos/seed/cookie/200' },
@@ -25,6 +27,7 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(localStorage.getItem('stall_last_sync'));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isEnergySaving, setIsEnergySaving] = useState(localStorage.getItem('stall_energy_saving') === 'true');
 
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('stall_products');
@@ -54,38 +57,35 @@ const App: React.FC = () => {
   const [tokenClient, setTokenClient] = useState<any>(null);
 
   useEffect(() => {
-    // Initialize Google Identity Services
     const initGsi = () => {
       if (typeof google !== 'undefined') {
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com', // In a real app, this is your ID
-          scope: 'https://www.googleapis.com/auth/drive.file',
-          callback: (tokenResponse: any) => {
-            if (tokenResponse && tokenResponse.access_token) {
-              localStorage.setItem('google_access_token', tokenResponse.access_token);
-              (window as any).google_access_token = tokenResponse.access_token;
-              setIsLoggedIn(true);
-              localStorage.setItem('stall_logged_in', 'true');
-            }
-          },
-        });
-        setTokenClient(client);
+        try {
+          const client = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+            callback: (tokenResponse: any) => {
+              if (tokenResponse && tokenResponse.access_token) {
+                localStorage.setItem('google_access_token', tokenResponse.access_token);
+                (window as any).google_access_token = tokenResponse.access_token;
+                setIsLoggedIn(true);
+                localStorage.setItem('stall_logged_in', 'true');
+              }
+            },
+            error_callback: (err: any) => console.error("Token Client Error:", err)
+          });
+          setTokenClient(client);
+        } catch (err) {
+          console.error("GSI Initialization Error:", err);
+        }
       }
     };
-
-    if (document.readyState === 'complete') {
-      initGsi();
-    } else {
-      window.addEventListener('load', initGsi);
-      return () => window.removeEventListener('load', initGsi);
-    }
+    if (document.readyState === 'complete') initGsi();
+    else { window.addEventListener('load', initGsi); return () => window.removeEventListener('load', initGsi); }
   }, []);
 
   const handleLogin = () => {
-    if (tokenClient) {
-      tokenClient.requestAccessToken();
-    } else {
-      // Fallback for development/testing environments without a configured Client ID
+    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_GOOGLE')) tokenClient.requestAccessToken();
+    else {
       setIsLoggedIn(true);
       localStorage.setItem('stall_logged_in', 'true');
     }
@@ -98,21 +98,24 @@ const App: React.FC = () => {
     if ((window as any).google_access_token) delete (window as any).google_access_token;
   };
 
-  const handleCloudSync = useCallback(async () => {
-    if (!navigator.onLine || !isLoggedIn) {
-      setSyncStatus('offline');
-      return;
-    }
+  const toggleEnergySaving = () => {
+    setIsEnergySaving(prev => {
+      const next = !prev;
+      localStorage.setItem('stall_energy_saving', String(next));
+      return next;
+    });
+  };
 
+  const handleCloudSync = useCallback(async () => {
+    if (!navigator.onLine || !isLoggedIn) { setSyncStatus('offline'); return; }
+    const token = (window as any).google_access_token || localStorage.getItem('google_access_token');
+    if (!token) { setSyncStatus('pending'); return; }
     setSyncStatus('syncing');
     try {
       const success = await syncToGoogleDrive({
-        products,
-        transactions,
-        reports,
+        products, transactions, reports,
         settings: { lang, telegramConfig, paymentQRCodes }
       });
-      
       if (success) {
         const now = new Date().toISOString();
         setLastSyncTime(now);
@@ -129,30 +132,16 @@ const App: React.FC = () => {
   }, [products, transactions, reports, lang, telegramConfig, paymentQRCodes, isLoggedIn]);
 
   const requestSync = useCallback(() => {
-    if (!navigator.onLine) {
-      setSyncStatus('pending');
-    } else {
-      handleCloudSync();
-    }
+    if (!navigator.onLine) setSyncStatus('pending');
+    else handleCloudSync();
   }, [handleCloudSync]);
 
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      if (syncStatus === 'pending' || syncStatus === 'offline' || syncStatus === 'error') {
-        handleCloudSync();
-      }
-    };
-    const handleOffline = () => {
-      setIsOnline(false);
-      setSyncStatus('offline');
-    };
+    const handleOnline = () => { setIsOnline(true); if (syncStatus === 'pending' || syncStatus === 'offline' || syncStatus === 'error') handleCloudSync(); };
+    const handleOffline = () => { setIsOnline(false); setSyncStatus('offline'); };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
   }, [handleCloudSync, syncStatus]);
 
   useEffect(() => {
@@ -172,9 +161,7 @@ const App: React.FC = () => {
         localStorage.setItem('stall_last_reset', todayDate);
         localStorage.setItem('stall_transactions', JSON.stringify([]));
         requestSync();
-      } else if (!lastResetStr) {
-        localStorage.setItem('stall_last_reset', todayDate);
-      }
+      } else if (!lastResetStr) localStorage.setItem('stall_last_reset', todayDate);
     };
     const interval = setInterval(checkCutoff, 60000);
     return () => clearInterval(interval);
@@ -187,44 +174,16 @@ const App: React.FC = () => {
   useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_change_logs', JSON.stringify(changeLogs)); }, [changeLogs, isLoggedIn]);
   useEffect(() => { if(isLoggedIn) localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig)); }, [telegramConfig, isLoggedIn]);
 
-  const sendTelegramMessage = async (htmlText: string) => {
-    const token = telegramConfig.botToken.trim();
-    const chat = telegramConfig.chatId.trim();
-    if (!token || !chat || !navigator.onLine) return;
-    const cleanToken = token.startsWith('bot') ? token : `bot${token}`;
-    try {
-      const response = await fetch(`https://api.telegram.org/${cleanToken}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chat, text: htmlText, parse_mode: 'HTML' })
-      });
-      return response.ok;
-    } catch (error) {
-      console.error("Telegram API Error:", error);
-      throw error;
-    }
-  };
-
-  const handleTestTelegram = async () => {
-    return sendTelegramMessage(`<b>✅ Connection Test Successful</b>\nTime: ${new Date().toLocaleTimeString()}`);
-  };
-
   const handleCompleteSale = (tx: Transaction) => {
     if ("geolocation" in navigator && navigator.onLine) {
       navigator.geolocation.getCurrentPosition((pos) => {
         saveTransaction({ ...tx, location: { lat: pos.coords.latitude, lng: pos.coords.longitude, name: "Stall" } });
       }, () => saveTransaction(tx), { timeout: 3000 });
-    } else {
-      saveTransaction(tx);
-    }
+    } else saveTransaction(tx);
   };
 
   const saveTransaction = (tx: Transaction) => {
     setTransactions(prev => [...prev, tx]);
-    const showTx = telegramConfig.alertType === 'transaction' || telegramConfig.alertType === 'both';
-    if (showTx && navigator.onLine) {
-      sendTelegramMessage(`<b>💰 New Transaction</b>\n<b>Total:</b> $${tx.total.toFixed(1)}`).catch(e => console.error(e));
-    }
     requestSync();
   };
 
@@ -253,13 +212,21 @@ const App: React.FC = () => {
 
   return (
     <HashRouter>
-      <Layout lang={lang} setLang={setLang} onLogout={handleLogout} isSyncing={syncStatus === 'syncing'} lastSyncTime={lastSyncTime}>
+      <Layout 
+        lang={lang} 
+        setLang={setLang} 
+        onLogout={handleLogout} 
+        isSyncing={syncStatus === 'syncing'} 
+        lastSyncTime={lastSyncTime}
+        isEnergySaving={isEnergySaving}
+        onToggleEnergySaving={toggleEnergySaving}
+      >
         <Routes>
           <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} />} />
           <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} />} />
           <Route path="/analytics" element={<AnalyticsView transactions={transactions} products={products} lang={lang} />} />
           <Route path="/records" element={<RecordsView transactions={transactions} lang={lang} />} />
-          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={handleTestTelegram} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} />} />
+          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={async () => true} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} />} />
         </Routes>
       </Layout>
     </HashRouter>

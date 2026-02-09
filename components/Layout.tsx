@@ -11,9 +11,20 @@ interface LayoutProps {
   onLogout: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
+  isEnergySaving?: boolean;
+  onToggleEnergySaving?: () => void;
 }
 
-const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, onLogout, isSyncing, lastSyncTime }) => {
+const Layout: React.FC<LayoutProps> = ({ 
+  children, 
+  lang, 
+  setLang, 
+  onLogout, 
+  isSyncing, 
+  lastSyncTime,
+  isEnergySaving = false,
+  onToggleEnergySaving
+}) => {
   const t = TRANSLATIONS[lang];
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -39,7 +50,7 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, onLogout, isSy
   );
 
   return (
-    <div className="flex flex-col md:flex-row h-screen bg-white md:bg-slate-50 overflow-hidden">
+    <div className={`flex flex-col md:flex-row h-screen bg-white md:bg-slate-50 overflow-hidden ${isEnergySaving ? 'low-power' : ''}`}>
       {/* Sidebar */}
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shrink-0 p-6">
         <div className="flex items-center gap-3 mb-10 px-2">
@@ -85,16 +96,20 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, onLogout, isSy
              <span className="text-[10px] bg-amber-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">Offline</span>
            )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {/* ENERGY SAVING TOGGLE replacing top-right logout */}
           <button 
-            onClick={onLogout}
-            className="bg-white/20 hover:bg-white/30 w-8 h-8 rounded-lg flex items-center justify-center text-xs transition-colors"
+            onClick={onToggleEnergySaving}
+            title="Toggle Energy Saving Mode"
+            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center transition-all border ${isEnergySaving ? 'bg-emerald-900/40 text-emerald-400 border-emerald-500/30 shadow-none' : 'bg-white/20 text-white border-transparent'}`}
           >
-            <i className="fas fa-arrow-right-from-bracket"></i>
+            <i className={`fas ${isEnergySaving ? 'fa-battery-full' : 'fa-battery-half'} text-[10px]`}></i>
+            <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">{isEnergySaving ? 'ECO' : 'SAVE'}</span>
           </button>
+          
           <button 
             onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
-            className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-xs font-bold transition-colors"
+            className="bg-white/20 hover:bg-white/30 px-3 h-10 rounded-xl text-xs font-bold transition-colors"
           >
             {lang === Language.EN ? '繁中' : 'EN'}
           </button>
@@ -107,7 +122,7 @@ const Layout: React.FC<LayoutProps> = ({ children, lang, setLang, onLogout, isSy
       </main>
 
       {/* Mobile Bottom Nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around items-center py-2 px-2 z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)]">
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around items-center py-2 px-2 z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] ${isEnergySaving ? 'bg-black border-slate-800' : ''}`}>
         <NavItem to="/" icon="fa-cash-register" label={t.ordering} />
         <NavItem to="/inventory" icon="fa-boxes-stacked" label={t.inventory} />
         <NavItem to="/records" icon="fa-receipt" label={t.records} />

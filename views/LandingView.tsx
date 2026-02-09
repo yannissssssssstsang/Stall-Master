@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Language } from '../types';
 
 interface LandingViewProps {
@@ -8,15 +8,14 @@ interface LandingViewProps {
   setLang: (l: Language) => void;
 }
 
-declare const google: any;
-
 const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => {
-  
-  const handleGoogleLogin = () => {
-    // In a real production app, you would use:
-    // client.requestAccessToken();
-    // For this environment, we call the parent onLogin which handles the library interaction
-    onLogin();
+  const [copied, setCopied] = useState(false);
+  const currentOrigin = window.location.origin;
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(currentOrigin);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
@@ -27,7 +26,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
 
       <div className="max-w-md w-full text-center space-y-12 z-10">
         <div className="flex flex-col items-center gap-6">
-          <div className="w-24 h-24 bg-blue-600 rounded-[32px] flex items-center justify-center shadow-2xl shadow-blue-200 animate-pulse-slow">
+          <div className="w-24 h-24 bg-blue-600 rounded-[32px] flex items-center justify-center shadow-2xl shadow-blue-200">
             <i className="fas fa-store text-white text-4xl"></i>
           </div>
           <div className="space-y-2">
@@ -42,7 +41,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
 
         <div className="space-y-4">
           <button 
-            onClick={handleGoogleLogin}
+            onClick={onLogin}
             className="w-full bg-slate-900 text-white p-6 rounded-[28px] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-4 group"
           >
             <div className="w-6 h-6 flex items-center justify-center">
@@ -64,12 +63,34 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
           </button>
         </div>
 
-        <div className="pt-8">
-          <p className="text-[10px] text-slate-400 font-bold px-12 leading-relaxed uppercase tracking-widest opacity-60">
+        {/* Privacy Note for End Users */}
+        <div className="bg-blue-50/50 p-6 rounded-[32px] border border-blue-100/50 text-left space-y-3">
+          <div className="flex items-center gap-3 text-blue-600">
+            <i className="fas fa-shield-halved text-sm"></i>
+            <p className="text-[10px] font-black uppercase tracking-widest">Privacy Guarantee</p>
+          </div>
+          <p className="text-[11px] font-medium text-slate-500 leading-relaxed">
             {lang === Language.ZH 
-              ? '點擊登入即代表您同意服務條款及隱私政策。所有數據將自動同步至您的雲端硬碟。' 
-              : 'By signing in, you agree to our Terms and Privacy Policy. All data syncs securely to your Google Drive.'}
+              ? '您的數據（庫存、銷售記錄）將私密地儲存在您自己的 Google Drive 中。我們不會訪問您的個人檔案，也不會儲存您的客戶資料。' 
+              : 'Your data (inventory, sales) is stored privately in your own Google Drive. We never access your personal files or store your customer data on our servers.'}
           </p>
+        </div>
+
+        {/* Developer Helper Section (Hide this before production) */}
+        <div className="mt-8 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center gap-2">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+            {lang === Language.ZH ? 'Google 控制台授權來源' : 'Authorized JavaScript Origin'}
+          </p>
+          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm overflow-hidden max-w-full">
+            <code className="text-[10px] font-mono text-blue-600 truncate">{currentOrigin}</code>
+            <button 
+              onClick={handleCopy}
+              className="text-slate-400 hover:text-blue-600 transition-colors"
+              title="Copy to clipboard"
+            >
+              <i className={`fas ${copied ? 'fa-check text-emerald-500' : 'fa-copy'}`}></i>
+            </button>
+          </div>
         </div>
 
         <button 

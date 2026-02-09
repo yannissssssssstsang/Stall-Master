@@ -40,6 +40,47 @@
             0%, 100% { opacity: 1; }
             50% { opacity: .5; }
         }
+
+        /* ENERGY SAVING MODE (Low Power) */
+        .low-power {
+            background-color: #000000 !important;
+        }
+        .low-power * {
+            animation: none !important;
+            transition-duration: 0ms !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+        }
+        /* Override common backgrounds in saving mode */
+        .low-power .bg-white, 
+        .low-power .bg-slate-50, 
+        .low-power .bg-slate-100 {
+            background-color: #000000 !important;
+            border-color: #1e293b !important; /* slate-800 */
+        }
+        .low-power .text-slate-800, 
+        .low-power .text-slate-900, 
+        .low-power .text-slate-700 {
+            color: #cbd5e1 !important; /* slate-300 */
+        }
+        .low-power .text-slate-400, 
+        .low-power .text-slate-500 {
+            color: #475569 !important; /* slate-600 */
+        }
+        .low-power img {
+            filter: grayscale(0.5) contrast(0.8) brightness(0.6);
+        }
+        .low-power .dashboard-card {
+            background: #000000 !important;
+            border: 1px solid #1e293b !important;
+            box-shadow: none !important;
+        }
+        .low-power .bg-blue-600 {
+            background-color: #1e3a8a !important; /* Muted blue for saving */
+        }
+        .low-power .text-blue-600 {
+            color: #60a5fa !important;
+        }
     </style>
 <script type="importmap">
 {

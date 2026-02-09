@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Product, CartItem, Language, Transaction, PaymentQRCodes } from '../types';
 import { TRANSLATIONS } from '../constants';
+import { sendReceiptEmail } from '../services/gmailService';
 
 interface OrderingViewProps {
   products: Product[];
@@ -27,7 +28,6 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
   const availableProducts = useMemo(() => products.filter(p => !p.isExtracting), [products]);
 
-  // Dynamically determine available payment methods based on uploaded QR codes
   const availablePaymentMethods = useMemo(() => {
     const methods = ['CASH'];
     Object.keys(customQRCodes).forEach(key => {
@@ -95,15 +95,16 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
     if (emailSent) {
       setIsSendingEmail(true);
-      await new Promise(resolve => setTimeout(resolve, 1800));
-      
-      console.log("%c[MOCK EMAIL SERVICE] Outbound Receipt", "color: white; background: #2563eb; padding: 4px 8px; border-radius: 4px; font-weight: bold;");
-      console.log(`Recipient: ${customerEmail}`);
-      console.table(transaction.items.map(i => ({ Item: i.name, Qty: i.quantity, Subtotal: `$${(i.price * i.quantity).toFixed(1)}` })));
-      
+      const success = await sendReceiptEmail(transaction, customerEmail, lang);
       setIsSendingEmail(false);
-      setIsEmailSent(true);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (success) {
+        setIsEmailSent(true);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      } else {
+        alert(lang === Language.ZH ? '電郵發送失敗，請檢查權限設置。' : 'Email failed to send. Please check your permissions.');
+        return;
+      }
     }
 
     onCompleteSale(transaction);
@@ -266,7 +267,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                     {isEmailSent ? 'Receipt Sent!' : 'Sale Recorded Successfully'}
                   </h4>
                   <p className="text-slate-400 text-xs font-medium mt-2">
-                    {isEmailSent ? `Sent to ${customerEmail}` : 'Would the customer like a digital receipt?'}
+                    {isEmailSent ? `Sent via Gmail to ${customerEmail}` : 'Would the customer like a digital receipt?'}
                   </p>
                 </div>
 
