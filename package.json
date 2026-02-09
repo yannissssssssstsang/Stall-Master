@@ -1,5 +1,4 @@
 {
-  "homepage": "https://yannissssssssstsang.github.io/Stall-Master/"
   "name": "stallmaster-pos",
   "private": true,
   "version": "0.0.0",
@@ -8,8 +7,6 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "predeploy": "npm run build",
-    "deploy": "gh-pages -d build"
   },
   "dependencies": {
     "react": "^19.2.4",
