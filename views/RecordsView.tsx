@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Transaction, Language } from '../types';
 import { TRANSLATIONS } from '../constants';
 
@@ -11,20 +11,91 @@ interface RecordsViewProps {
 const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
   const t = TRANSLATIONS[lang];
 
-  const sortedTransactions = [...transactions].sort((a, b) => 
-    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  const sortedTransactions = useMemo(() => 
+    [...transactions].sort((a, b) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    ), [transactions]
   );
 
+  const paymentSummary = useMemo(() => {
+    const summary: Record<string, number> = {};
+    transactions.forEach(tx => {
+      summary[tx.paymentMethod] = (summary[tx.paymentMethod] || 0) + tx.total;
+    });
+    return Object.entries(summary).sort((a, b) => b[1] - a[1]);
+  }, [transactions]);
+
+  const getMethodIcon = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'CASH': return 'fa-money-bill-wave';
+      case 'PAYME': return 'fa-qrcode';
+      case 'ALIPAY': return 'fa-mobile-screen';
+      case 'FPS': return 'fa-bolt';
+      default: return 'fa-wallet';
+    }
+  };
+
+  const getMethodColor = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'CASH': return 'bg-emerald-500 shadow-emerald-100 text-white';
+      case 'PAYME': return 'bg-red-500 shadow-red-100 text-white';
+      case 'ALIPAY': return 'bg-sky-500 shadow-sky-100 text-white';
+      case 'FPS': return 'bg-orange-500 shadow-orange-100 text-white';
+      default: return 'bg-slate-500 shadow-slate-100 text-white';
+    }
+  };
+
+  const getMethodBgLite = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'CASH': return 'bg-emerald-50 border-emerald-100';
+      case 'PAYME': return 'bg-red-50 border-red-100';
+      case 'ALIPAY': return 'bg-sky-50 border-sky-100';
+      case 'FPS': return 'bg-orange-50 border-orange-100';
+      default: return 'bg-slate-50 border-slate-100';
+    }
+  };
+
+  const getMethodText = (method: string) => {
+    switch (method.toUpperCase()) {
+      case 'CASH': return 'text-emerald-600';
+      case 'PAYME': return 'text-red-600';
+      case 'ALIPAY': return 'text-sky-600';
+      case 'FPS': return 'text-orange-600';
+      default: return 'text-slate-600';
+    }
+  };
+
   return (
-    <div className="space-y-6 pb-20 md:pb-8">
+    <div className="space-y-8 pb-20 md:pb-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
         <div>
-          <h2 className="text-2xl font-black text-slate-800">{t.records}</h2>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">{t.records}</h2>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Transaction Log & History</p>
         </div>
       </div>
 
+      {/* Payment Method Summary Section */}
+      {paymentSummary.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-scale-in">
+          {paymentSummary.map(([method, amount]) => (
+            <div key={method} className={`p-4 rounded-[24px] border shadow-sm ${getMethodBgLite(method)} flex flex-col gap-2`}>
+              <div className="flex items-center justify-between">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm ${getMethodColor(method)}`}>
+                  <i className={`fas ${getMethodIcon(method)} text-[10px]`}></i>
+                </div>
+                <span className={`text-[9px] font-black uppercase tracking-widest opacity-60 ${getMethodText(method)}`}>{method}</span>
+              </div>
+              <div>
+                <p className={`text-xl font-black ${getMethodText(method)}`}>${amount.toFixed(1)}</p>
+                <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Total Collected</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="space-y-4">
+        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Recent Transactions</h3>
         {sortedTransactions.map((tx) => (
           <div key={tx.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 hover:shadow-md transition-shadow group">
             <div className="flex justify-between items-start">
@@ -32,12 +103,14 @@ const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm ${
                   tx.paymentMethod === 'CASH' ? 'bg-emerald-500' : 
                   tx.paymentMethod === 'PAYME' ? 'bg-red-500' :
-                  tx.paymentMethod === 'ALIPAY' ? 'bg-sky-500' : 'bg-orange-500'
+                  tx.paymentMethod === 'ALIPAY' ? 'bg-sky-500' : 
+                  tx.paymentMethod === 'FPS' ? 'bg-orange-500' : 'bg-slate-500'
                 }`}>
                   <i className={`fas ${
                     tx.paymentMethod === 'CASH' ? 'fa-money-bill-wave' : 
                     tx.paymentMethod === 'PAYME' ? 'fa-qrcode' :
-                    tx.paymentMethod === 'ALIPAY' ? 'fa-mobile-screen' : 'fa-bolt'
+                    tx.paymentMethod === 'ALIPAY' ? 'fa-mobile-screen' : 
+                    tx.paymentMethod === 'FPS' ? 'fa-bolt' : 'fa-wallet'
                   } text-xs`}></i>
                 </div>
                 <div>

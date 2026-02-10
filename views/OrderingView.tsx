@@ -186,7 +186,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
       {isCheckoutOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-end md:items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-[48px] p-8 shadow-2xl animate-scale-in max-h-[95vh] overflow-y-auto">
+          <div className="bg-white w-full max-w-lg rounded-[48px] p-6 md:p-8 shadow-2xl animate-scale-in max-h-[95vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{showReceiptChoice ? 'Transaction Complete' : 'Order Summary'}</h3>
               <button onClick={() => setIsCheckoutOpen(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
@@ -194,27 +194,39 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
             {!showReceiptChoice ? (
               <div className="space-y-6">
-                <div className="bg-slate-50 rounded-3xl p-6 space-y-4 max-h-48 overflow-y-auto border border-slate-100">
+                {/* Order Summary List - Redesigned to remove per-item totals and larger quantity buttons */}
+                <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                   {cart.map(item => (
-                    <div key={item.id} className="flex justify-between items-center">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl p-1 pr-3">
-                          <button onClick={() => removeFromCart(item.id)} className="w-7 h-7 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"><i className="fas fa-minus text-[10px]"></i></button>
-                          <span className="text-xs font-black text-slate-700">{item.quantity}</span>
-                          <button onClick={() => addToCart(item)} className="w-7 h-7 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"><i className="fas fa-plus text-[10px]"></i></button>
-                        </div>
-                        <span className="text-sm font-bold text-slate-600 truncate max-w-[120px] uppercase tracking-tight">{item.name}</span>
+                    <div key={item.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-3xl border border-slate-100">
+                      <div className="flex flex-col flex-1 min-w-0 mr-4">
+                        <span className="text-sm font-black text-slate-800 uppercase tracking-tight truncate">{item.name}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">${item.price} / unit</span>
                       </div>
-                      <span className="text-sm font-black text-slate-800">${(item.price * item.quantity).toFixed(1)}</span>
+                      <div className="flex items-center bg-white rounded-full p-1 border border-slate-200 shadow-sm">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }} 
+                          className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-600 active:scale-90 transition-all"
+                        >
+                          <i className="fas fa-minus text-[12px]"></i>
+                        </button>
+                        <span className="w-10 text-center text-base font-black text-slate-700">{item.quantity}</span>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); addToCart(item); }} 
+                          className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 active:scale-90 transition-all shadow-md shadow-blue-100"
+                        >
+                          <i className="fas fa-plus text-[12px]"></i>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="flex justify-between items-center px-4">
+                <div className="flex justify-between items-center px-4 pt-4 border-t border-slate-100">
                   <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{t.total}</span>
-                  <span className="text-3xl font-black text-blue-600">${cartTotal.toFixed(1)}</span>
+                  <span className="text-4xl font-black text-blue-600">${cartTotal.toFixed(1)}</span>
                 </div>
 
+                {/* Payment Method Selector Grid */}
                 <div className="grid grid-cols-2 gap-3">
                   {availablePaymentMethods.map(method => (
                     <button 
@@ -235,15 +247,22 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                   ))}
                 </div>
 
+                {/* Redesigned SCAN TO PAY layout - Full width and maximized for scanning */}
                 {selectedPayment && selectedPayment !== 'CASH' && (
-                  <div className="flex flex-col items-center gap-4 p-6 bg-slate-50 rounded-[32px] animate-scale-in border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.scanToPay}</p>
-                    <div className="w-48 h-48 bg-white p-4 rounded-[24px] shadow-sm flex items-center justify-center overflow-hidden border border-slate-100">
+                  <div className="flex flex-col items-center gap-4 p-4 md:p-6 bg-slate-900 rounded-[40px] animate-scale-in shadow-2xl border border-slate-800">
+                    <div className="flex items-center gap-2">
+                       <i className="fas fa-expand text-blue-400 text-[10px]"></i>
+                       <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">{t.scanToPay}</p>
+                    </div>
+                    <div className="w-full bg-white p-4 md:p-6 rounded-[32px] shadow-inner flex items-center justify-center ring-8 ring-blue-600/10">
                       <img 
                         src={customQRCodes[selectedPayment]} 
-                        alt="QR Code" 
-                        className="w-full h-full object-contain"
+                        alt="Payment QR Code" 
+                        className="w-full h-auto max-w-[400px] object-contain block mx-auto"
                       />
+                    </div>
+                    <div className="text-center px-4">
+                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Scanning {selectedPayment} at ${cartTotal.toFixed(1)}</p>
                     </div>
                   </div>
                 )}

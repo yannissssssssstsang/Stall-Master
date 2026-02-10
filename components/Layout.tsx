@@ -11,8 +11,8 @@ interface LayoutProps {
   onLogout: () => void;
   isSyncing?: boolean;
   lastSyncTime?: string | null;
-  isEnergySaving?: boolean;
-  onToggleEnergySaving?: () => void;
+  isDarkMode?: boolean;
+  onToggleDarkMode?: () => void;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -22,8 +22,8 @@ const Layout: React.FC<LayoutProps> = ({
   onLogout, 
   isSyncing, 
   lastSyncTime,
-  isEnergySaving = false,
-  onToggleEnergySaving
+  isDarkMode = false,
+  onToggleDarkMode
 }) => {
   const t = TRANSLATIONS[lang];
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -50,14 +50,14 @@ const Layout: React.FC<LayoutProps> = ({
   );
 
   return (
-    <div className={`flex flex-col md:flex-row h-screen bg-white md:bg-slate-50 overflow-hidden ${isEnergySaving ? 'low-power' : ''}`}>
-      {/* Sidebar */}
-      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 shrink-0 p-6">
+    <div className={`flex flex-col md:flex-row h-screen overflow-hidden transition-colors duration-300 ${isDarkMode ? 'dark-mode bg-slate-900' : 'bg-white md:bg-slate-50'}`}>
+      {/* Sidebar (Desktop & Tablet) */}
+      <aside className={`hidden md:flex flex-col w-64 border-r shrink-0 p-6 transition-colors duration-300 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'}`}>
         <div className="flex items-center gap-3 mb-10 px-2">
           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-200">
             <i className="fas fa-store text-white"></i>
           </div>
-          <h1 className="text-xl font-bold tracking-tight text-slate-800">{t.appName}</h1>
+          <h1 className={`text-xl font-bold tracking-tight ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>{t.appName}</h1>
         </div>
 
         <nav className="flex-1 space-y-2">
@@ -68,26 +68,52 @@ const Layout: React.FC<LayoutProps> = ({
           <NavItem to="/settings" icon="fa-cog" label={t.settings} />
         </nav>
 
-        <div className="pt-6 border-t border-slate-100 space-y-4">
+        <div className={`pt-6 border-t space-y-3 ${isDarkMode ? 'border-slate-700' : 'border-slate-100'}`}>
+          {/* Sidebar Dark Mode Toggle */}
+          <button 
+            onClick={onToggleDarkMode}
+            className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${isDarkMode ? 'bg-blue-900/20 border-blue-500/30 text-blue-400' : 'bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100'}`}
+          >
+            <div className="flex items-center gap-3">
+              <i className={`fas ${isDarkMode ? 'fa-moon' : 'fa-sun'} text-sm`}></i>
+              <span className="text-[10px] font-bold uppercase tracking-widest">{isDarkMode ? 'Dark Mode' : 'Light Mode'}</span>
+            </div>
+            <div className={`w-8 h-4 rounded-full relative transition-colors ${isDarkMode ? 'bg-blue-500' : 'bg-slate-300'}`}>
+              <div className={`absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all ${isDarkMode ? 'right-0.5' : 'left-0.5'}`}></div>
+            </div>
+          </button>
+
+          {/* Sidebar Language Toggle */}
+          <button 
+            onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
+            className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-100 text-slate-500 hover:bg-slate-100'}`}
+          >
+            <div className="flex items-center gap-3">
+              <i className="fas fa-globe text-sm"></i>
+              <span className="text-[10px] font-bold uppercase tracking-widest">{lang === Language.EN ? 'English' : '繁體中文'}</span>
+            </div>
+            <span className="text-[10px] font-black text-blue-600">{lang === Language.EN ? 'ZH' : 'EN'}</span>
+          </button>
+
           <button 
             onClick={onLogout}
-            className="w-full bg-red-50 hover:bg-red-100 text-red-600 py-3 rounded-xl font-black transition-colors text-xs uppercase tracking-widest flex items-center justify-center gap-3"
+            className={`w-full py-3 rounded-xl font-black transition-colors text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 border ${isDarkMode ? 'bg-red-950/20 border-red-900/30 text-red-500 hover:bg-red-950/40' : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100'}`}
           >
             <i className="fas fa-arrow-right-from-bracket"></i>
             Sign Out
           </button>
           
-          <div className="flex items-center justify-between px-3">
-             <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
+          <div className="flex items-center justify-between px-3 pt-1">
+             <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-slate-500' : 'text-slate-300'}`}>
                {isSyncing ? 'Syncing...' : (isOnline ? 'Cloud Active' : 'Offline')}
              </span>
-             <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 sync-pulse' : (isOnline ? 'bg-green-500' : 'bg-amber-500 animate-pulse')}`}></div>
+             <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-500 sync-pulse' : (isOnline ? 'bg-green-500' : 'bg-amber-500 animate-pulse')}`}></div>
           </div>
         </div>
       </aside>
 
       {/* Mobile Header */}
-      <header className={`md:hidden text-white p-4 flex justify-between items-center shrink-0 z-50 shadow-md ${isSyncing ? 'bg-blue-500' : (isOnline ? 'bg-blue-600' : 'bg-slate-800')}`}>
+      <header className={`md:hidden text-white p-4 flex justify-between items-center shrink-0 z-50 shadow-md transition-colors duration-300 ${isDarkMode ? 'bg-slate-800' : (isSyncing ? 'bg-blue-500' : (isOnline ? 'bg-blue-600' : 'bg-slate-800'))}`}>
         <div className="flex items-center gap-3">
            <h1 className="text-xl font-bold tracking-tight">{t.appName}</h1>
            {isSyncing ? (
@@ -97,13 +123,12 @@ const Layout: React.FC<LayoutProps> = ({
            )}
         </div>
         <div className="flex items-center gap-2">
-          {/* ENERGY SAVING TOGGLE replacing logout */}
           <button 
-            onClick={onToggleEnergySaving}
-            className={`w-12 h-10 rounded-xl flex flex-col items-center justify-center transition-all border ${isEnergySaving ? 'bg-emerald-900/40 text-emerald-400 border-emerald-500/30' : 'bg-white/20 text-white border-transparent'}`}
+            onClick={onToggleDarkMode}
+            className={`w-12 h-10 rounded-xl flex flex-col items-center justify-center transition-all border ${isDarkMode ? 'bg-blue-900/40 text-blue-400 border-blue-500/30' : 'bg-white/20 text-white border-transparent'}`}
           >
-            <i className={`fas ${isEnergySaving ? 'fa-battery-full' : 'fa-battery-half'} text-[10px]`}></i>
-            <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">{isEnergySaving ? 'ECO' : 'SAVE'}</span>
+            <i className={`fas ${isDarkMode ? 'fa-moon' : 'fa-sun'} text-[10px]`}></i>
+            <span className="text-[7px] font-black uppercase tracking-tighter mt-0.5">{isDarkMode ? 'DARK' : 'LIGHT'}</span>
           </button>
           
           <button 
@@ -116,12 +141,12 @@ const Layout: React.FC<LayoutProps> = ({
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto relative p-4 md:p-8 lg:p-12">
+      <main className={`flex-1 overflow-y-auto relative p-4 md:p-8 lg:p-12 transition-colors duration-300 ${isDarkMode ? 'bg-slate-900' : 'bg-white md:bg-slate-50'}`}>
         <div className="max-w-7xl mx-auto">{children}</div>
       </main>
 
       {/* Mobile Bottom Nav */}
-      <nav className={`md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-100 flex justify-around items-center py-2 px-2 z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] ${isEnergySaving ? 'bg-black border-slate-800' : ''}`}>
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 border-t flex justify-around items-center py-2 px-2 z-50 shadow-[0_-4px_10px_rgba(0,0,0,0.05)] transition-colors duration-300 ${isDarkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}>
         <NavItem to="/" icon="fa-cash-register" label={t.ordering} />
         <NavItem to="/inventory" icon="fa-boxes-stacked" label={t.inventory} />
         <NavItem to="/records" icon="fa-receipt" label={t.records} />

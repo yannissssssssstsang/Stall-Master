@@ -13,7 +13,6 @@ import { syncToGoogleDrive } from './services/googleDriveService';
 
 declare const google: any;
 
-// PASTE YOUR CLIENT ID FROM GOOGLE CLOUD CONSOLE HERE
 const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
 
 const INITIAL_PRODUCTS: Product[] = [
@@ -28,7 +27,7 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(localStorage.getItem('stall_last_sync'));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [isEnergySaving, setIsEnergySaving] = useState(localStorage.getItem('stall_energy_saving') === 'true');
+  const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('stall_dark_mode') === 'true');
 
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('stall_products');
@@ -99,10 +98,10 @@ const App: React.FC = () => {
     if ((window as any).google_access_token) delete (window as any).google_access_token;
   };
 
-  const toggleEnergySaving = () => {
-    setIsEnergySaving(prev => {
+  const toggleDarkMode = () => {
+    setIsDarkMode(prev => {
       const next = !prev;
-      localStorage.setItem('stall_energy_saving', String(next));
+      localStorage.setItem('stall_dark_mode', String(next));
       return next;
     });
   };
@@ -181,8 +180,8 @@ const App: React.FC = () => {
         onLogout={handleLogout} 
         isSyncing={syncStatus === 'syncing'} 
         lastSyncTime={lastSyncTime}
-        isEnergySaving={isEnergySaving}
-        onToggleEnergySaving={toggleEnergySaving}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
       >
         <Routes>
           <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} />} />
