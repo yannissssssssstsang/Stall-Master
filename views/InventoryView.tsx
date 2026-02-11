@@ -11,6 +11,7 @@ interface InventoryViewProps {
   onUpdateProduct: (p: Product) => void;
   onDeleteProduct: (productId: string) => void;
   changeLogs: ProductChangeLog[];
+  onBatchUpdateStock: (productIds: string[], amount: number) => void;
 }
 
 const optimizeImage = (base64: string, maxWidth: number = 500): Promise<string> => {
@@ -34,7 +35,7 @@ const optimizeImage = (base64: string, maxWidth: number = 500): Promise<string> 
   });
 };
 
-const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProduct, onUpdateProduct, onDeleteProduct, changeLogs }) => {
+const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProduct, onUpdateProduct, onDeleteProduct, changeLogs, onBatchUpdateStock }) => {
   const t = TRANSLATIONS[lang];
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -45,6 +46,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
   const [selectedDriveItems, setSelectedDriveItems] = useState<string[]>([]);
   const [swipedId, setSwipedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Batch states
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchAmount, setBatchAmount] = useState<string>('0');
 
   const localInputRef = useRef<HTMLInputElement>(null);
   const manualImageInputRef = useRef<HTMLInputElement>(null);
@@ -212,6 +218,23 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
   const handleDelete = (id: string) => {
     onDeleteProduct(id);
     setSwipedId(null);
+    setSelectedIds(prev => prev.filter(sid => sid !== id));
+  };
+
+  const toggleSelection = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
+    );
+  };
+
+  const handlePerformBatchUpdate = () => {
+    const amount = parseInt(batchAmount) || 0;
+    if (amount !== 0) {
+      onBatchUpdateStock(selectedIds, amount);
+    }
+    setShowBatchModal(false);
+    setSelectedIds([]);
+    setBatchAmount('0');
   };
 
   const filteredProducts = products.filter(p => 
@@ -339,10 +362,11 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
         {filteredProducts.map((product) => (
           <div 
             key={product.id} 
-            className="relative overflow-hidden rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-shadow group"
+            className={`relative overflow-hidden rounded-3xl bg-white border transition-all group ${selectedIds.includes(product.id) ? 'border-blue-500 ring-2 ring-blue-500/10' : 'border-slate-100 shadow-sm hover:shadow-md'}`}
             onClick={(e) => {
               e.stopPropagation();
               if (swipedId === product.id) setSwipedId(null);
+              else toggleSelection(product.id);
             }}
             onTouchStart={handleTouchStart}
             onTouchMove={(e) => handleTouchMove(e, product.id)}
@@ -358,9 +382,16 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
               </button>
             </div>
 
-            <div className={`flex items-center gap-4 p-4 transition-transform duration-300 ease-out bg-white ${swipedId === product.id ? '-translate-x-24' : 'translate-x-0'}`}>
-              <div className="w-16 h-16 bg-slate-50 rounded-2xl border border-slate-100 shrink-0 overflow-hidden relative">
-                <img src={product.image || `https://picsum.photos/seed/${product.id}/200`} alt={product.name} className="w-full h-full object-cover" />
+            <div className={`flex items-center gap-4 p-4 transition-transform duration-300 ease-out ${swipedId === product.id ? '-translate-x-24' : 'translate-x-0'}`}>
+              <div className="relative shrink-0">
+                <div className={`w-16 h-16 bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden relative`}>
+                  <img src={product.image || `https://picsum.photos/seed/${product.id}/200`} alt={product.name} className="w-full h-full object-cover" />
+                </div>
+                {selectedIds.includes(product.id) && (
+                  <div className="absolute -top-1 -left-1 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center border-2 border-white shadow-sm z-10 animate-scale-in">
+                    <i className="fas fa-check text-[10px]"></i>
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 min-w-0">
@@ -400,6 +431,75 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
           </div>
         )}
       </div>
+
+      {/* Batch Action Bar */}
+      {selectedIds.length > 0 && (
+        <div className="fixed bottom-20 md:bottom-8 left-4 right-4 md:left-auto md:right-8 md:w-96 z-[100] animate-scale-in">
+          <div className="bg-slate-900 text-white p-4 rounded-[32px] shadow-2xl flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <span className="bg-blue-600 w-8 h-8 rounded-xl flex items-center justify-center text-[11px] font-black shadow-lg shadow-blue-500/20">{selectedIds.length}</span>
+              <span className="text-[10px] font-black uppercase tracking-widest">Selected Items</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setSelectedIds([])}
+                className="w-10 h-10 bg-slate-800 text-slate-400 rounded-xl flex items-center justify-center hover:text-white transition-colors"
+              >
+                <i className="fas fa-times text-xs"></i>
+              </button>
+              <button 
+                onClick={() => setShowBatchModal(true)}
+                className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-500/20 active:scale-95 transition-all"
+              >
+                Update Stock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Update Modal */}
+      {showBatchModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4" onClick={() => setShowBatchModal(false)}>
+          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Batch Stock</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Updating {selectedIds.length} products</p>
+              </div>
+              <button onClick={() => setShowBatchModal(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="text-center">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Enter quantity to add or subtract</p>
+                <div className="flex items-center justify-center gap-4">
+                  <button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) - 1))} className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"><i className="fas fa-minus"></i></button>
+                  <input 
+                    type="number" 
+                    value={batchAmount}
+                    onChange={e => setBatchAmount(e.target.value)}
+                    className="w-24 p-4 bg-slate-50 border border-slate-100 rounded-[20px] text-center text-xl font-black text-blue-600 outline-none focus:border-blue-500 shadow-inner"
+                  />
+                  <button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) + 1))} className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 active:scale-90 transition-all"><i className="fas fa-plus"></i></button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) + 10))} className="p-3 bg-slate-50 text-slate-400 text-[10px] font-black uppercase rounded-xl hover:bg-slate-100">+10</button>
+                <button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) - 10))} className="p-3 bg-slate-50 text-slate-400 text-[10px] font-black uppercase rounded-xl hover:bg-slate-100">-10</button>
+              </div>
+
+              <button 
+                onClick={handlePerformBatchUpdate}
+                className="w-full bg-blue-600 text-white p-5 rounded-[24px] font-black uppercase tracking-[0.2em] shadow-xl shadow-blue-100 transition-all active:scale-[0.98]"
+              >
+                Process Batch
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDrivePicker && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[150] flex items-center justify-center p-4" onClick={() => setShowDrivePicker(false)}>

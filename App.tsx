@@ -22,6 +22,7 @@ const INITIAL_PRODUCTS: Product[] = [
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('stall_logged_in') === 'true');
+  const [googleToken, setGoogleToken] = useState<string | null>(localStorage.getItem('google_access_token'));
   const [lang, setLang] = useState<Language>(Language.ZH);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(localStorage.getItem('stall_last_sync'));
@@ -80,6 +81,7 @@ const App: React.FC = () => {
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
               localStorage.setItem('google_access_token', tokenResponse.access_token);
+              setGoogleToken(tokenResponse.access_token);
               (window as any).google_access_token = tokenResponse.access_token;
               setIsLoggedIn(true);
               localStorage.setItem('stall_logged_in', 'true');
@@ -100,15 +102,18 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = () => {
-    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_CLIENT')) tokenClient.requestAccessToken();
-    else {
+    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_CLIENT')) {
+      tokenClient.requestAccessToken();
+    } else {
       setIsLoggedIn(true);
       localStorage.setItem('stall_logged_in', 'true');
+      setGoogleToken('demo_token');
     }
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
+    setGoogleToken(null);
     localStorage.setItem('stall_logged_in', 'false');
     localStorage.removeItem('google_access_token');
     if ((window as any).google_access_token) delete (window as any).google_access_token;
@@ -124,8 +129,7 @@ const App: React.FC = () => {
 
   const handleCloudSync = useCallback(async () => {
     if (!navigator.onLine || !isLoggedIn) { setSyncStatus('offline'); return; }
-    const token = (window as any).google_access_token || localStorage.getItem('google_access_token');
-    if (!token) { setSyncStatus('pending'); return; }
+    if (!googleToken) { setSyncStatus('pending'); return; }
     setSyncStatus('syncing');
     try {
       const success = await syncToGoogleDrive({
@@ -145,7 +149,7 @@ const App: React.FC = () => {
       setSyncStatus('error');
       setTimeout(() => setSyncStatus('pending'), 5000);
     }
-  }, [products, transactions, reports, lang, telegramConfig, paymentQRCodes, isLoggedIn]);
+  }, [products, transactions, reports, lang, telegramConfig, paymentQRCodes, isLoggedIn, googleToken]);
 
   const requestSync = useCallback(() => {
     if (navigator.onLine) handleCloudSync();
@@ -174,6 +178,43 @@ const App: React.FC = () => {
       }
       return prev;
     });
+  };
+
+  const handleBatchUpdateStock = (productIds: string[], amount: number) => {
+    const timestamp = new Date().toISOString();
+    const newLogs: ProductChangeLog[] = [];
+
+    setProducts(prev => {
+      return prev.map(p => {
+        if (productIds.includes(p.id)) {
+          const oldStock = p.stock;
+          const newStock = Math.max(0, p.stock + amount);
+          
+          if (oldStock !== newStock) {
+            newLogs.push({
+              id: Math.random().toString(36).substr(2, 9),
+              productId: p.id,
+              productName: p.name,
+              field: 'stock',
+              oldValue: oldStock,
+              newValue: newStock,
+              timestamp
+            });
+          }
+          return { ...p, stock: newStock };
+        }
+        return p;
+      });
+    });
+
+    if (newLogs.length > 0) {
+      setChangeLogs(prevLogs => {
+        const updatedLogs = [...newLogs, ...prevLogs].slice(0, 100);
+        localStorage.setItem('stall_change_logs', JSON.stringify(updatedLogs));
+        return updatedLogs;
+      });
+    }
+    requestSync();
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
@@ -243,11 +284,11 @@ const App: React.FC = () => {
         onToggleDarkMode={toggleDarkMode}
       >
         <Routes>
-          <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} />} />
-          <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} />} />
+          <Route path="/" element={<OrderingView products={products} lang={lang} googleToken={googleToken} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} onReauth={handleLogin} />} />
+          <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} onBatchUpdateStock={handleBatchUpdateStock} />} />
           <Route path="/analytics" element={<AnalyticsView transactions={transactions} products={products} lang={lang} />} />
           <Route path="/records" element={<RecordsView transactions={transactions} lang={lang} />} />
-          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={async () => true} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} />} />
+          <Route path="/settings" element={<SettingsView lang={lang} googleToken={googleToken} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={async () => true} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} onReauth={handleLogin} />} />
         </Routes>
       </Layout>
     </HashRouter>
