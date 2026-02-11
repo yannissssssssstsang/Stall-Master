@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { Transaction, Language, Product } from '../types';
 import { TRANSLATIONS } from '../constants';
@@ -17,7 +16,9 @@ type DateRange = 'today' | 'all';
 const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, products }) => {
   const t = TRANSLATIONS[lang] as any;
   const mapRef = useRef<any>(null);
+  const timerRef = useRef<number | null>(null);
   const [range, setRange] = useState<DateRange>('today');
+  const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
 
   // Filtering transactions based on range
   const filteredTransactions = useMemo(() => {
@@ -45,8 +46,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
     filteredTransactions.forEach(tx => {
       if (tx.location) {
-        // Rounding to 4 decimal places roughly groups points within ~11 meters
-        const key = `${tx.location.lat.toFixed(4)},${tx.location.lng.toFixed(4)}`;
+        const key = `${tx.location.lat.toFixed(5)},${tx.location.lng.toFixed(5)}`;
         if (!stats[key]) {
           stats[key] = { 
             lat: tx.location.lat, 
@@ -73,7 +73,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       const hour = new Date(tx.timestamp).getHours();
       map[hour] = (map[hour] || 0) + tx.total;
     });
-    // Returning all 24 hours from 00:00 to 23:00
     return Array.from({ length: 24 }, (_, i) => ({
       hour: `${i.toString().padStart(2, '0')}:00`,
       amount: map[i] || 0
@@ -93,30 +92,68 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       .slice(0, 5);
   }, [filteredTransactions]);
 
+  // Initial user location fetch
   useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => console.warn("Initial user location fetch failed"),
+        { enableHighAccuracy: false, timeout: 5000 }
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof L === 'undefined') return;
+    const container = document.getElementById('analytics-map');
+    if (!container) return;
+
+    // Helper to check if map is still valid and in DOM
+    const isMapValid = () => {
+      return mapRef.current && container.isConnected;
+    };
+
     if (!mapRef.current) {
-      const center: [number, number] = locationStats.length > 0 ? [locationStats[0].lat, locationStats[0].lng] : [22.3193, 114.1694];
-      mapRef.current = L.map('analytics-map', {
-        zoomControl: false,
-        attributionControl: false
-      }).setView(center, 13);
-      
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { 
-        attribution: '&copy; OpenStreetMap' 
-      }).addTo(mapRef.current);
-      
-      L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
+      let initialCenter: [number, number] = [22.3193, 114.1694];
+      if (locationStats.length > 0) {
+        initialCenter = [locationStats[0].lat, locationStats[0].lng];
+      } else if (userLoc) {
+        initialCenter = [userLoc.lat, userLoc.lng];
+      }
+
+      try {
+        mapRef.current = L.map('analytics-map', {
+          zoomControl: false,
+          attributionControl: false,
+          // Track container resize to avoid _leaflet_pos issues
+          trackResize: true
+        }).setView(initialCenter, locationStats.length > 0 ? 15 : 13);
+        
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { 
+          attribution: '&copy; OpenStreetMap' 
+        }).addTo(mapRef.current);
+        
+        L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
+
+        // Schedule invalidateSize after a short delay to ensure DOM is ready
+        timerRef.current = window.setTimeout(() => {
+          if (isMapValid()) {
+            mapRef.current.invalidateSize();
+          }
+        }, 100);
+      } catch (err) {
+        console.error("Leaflet initialization failed", err);
+      }
     }
 
-    if (mapRef.current) {
-      // Clear existing layers
+    if (isMapValid()) {
+      // Clear existing markers
       mapRef.current.eachLayer((layer: any) => { 
-        if (layer instanceof L.CircleMarker) mapRef.current?.removeLayer(layer); 
+        if (layer instanceof L.CircleMarker) mapRef.current.removeLayer(layer); 
       });
 
       locationStats.forEach(stat => {
-        // Calculate radius: base 6px + relative to revenue sqrt (area scaling)
-        const radius = 6 + (Math.sqrt(stat.revenue / maxRevenue) * 30);
+        const radius = 8 + (Math.sqrt(stat.revenue / maxRevenue) * 25);
         
         const bubble = L.circleMarker([stat.lat, stat.lng], {
           radius: radius,
@@ -125,45 +162,68 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           weight: 2,
           opacity: 1,
           fillOpacity: 0.7
-        }).addTo(mapRef.current!);
+        }).addTo(mapRef.current);
 
         bubble.bindPopup(`
-          <div class="p-2 min-w-[120px]">
-            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">${stat.name}</p>
+          <div class="p-2 min-w-[140px]">
+            <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">STALL LOCATION</p>
             <div class="flex justify-between items-baseline mb-1">
-              <span class="text-lg font-black text-slate-800">$${stat.revenue.toFixed(1)}</span>
+              <span class="text-lg font-black text-slate-800">$${stat.revenue.toLocaleString()}</span>
             </div>
-            <p class="text-[10px] text-slate-500 font-medium">${stat.count} Total Transactions</p>
+            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-tight">${stat.count} Transactions</p>
           </div>
         `, { closeButton: false, className: 'custom-map-popup' });
 
-        bubble.on('mouseover', function (e: any) {
+        bubble.on('mouseover', function (this: any) {
           this.setStyle({ fillOpacity: 0.9, weight: 3, fillColor: '#2563eb' });
           this.openPopup();
         });
-        bubble.on('mouseout', function (e: any) {
+        bubble.on('mouseout', function (this: any) {
           this.setStyle({ fillOpacity: 0.7, weight: 2, fillColor: '#3b82f6' });
         });
       });
 
-      // Fit bounds if there are markers and "All" is selected to see everything
-      if (locationStats.length > 0 && range === 'all') {
-        const group = new L.featureGroup(locationStats.map(s => L.marker([s.lat, s.lng])));
-        mapRef.current.fitBounds(group.getBounds().pad(0.5));
+      // Fit bounds safely
+      if (locationStats.length > 0) {
+        const bounds = locationStats.map(s => [s.lat, s.lng] as [number, number]);
+        try {
+          if (locationStats.length === 1) {
+            mapRef.current.setView(bounds[0], 16, { animate: true });
+          } else {
+            mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+          }
+        } catch (e) {
+          console.warn("fitBounds failed, usually due to container size", e);
+        }
+      } else if (userLoc) {
+        mapRef.current.panTo([userLoc.lat, userLoc.lng]);
       }
     }
-  }, [locationStats, maxRevenue, range]);
+
+    return () => {
+      if (timerRef.current) {
+        window.clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch (e) {
+          console.warn("Map removal error", e);
+        }
+        mapRef.current = null;
+      }
+    };
+  }, [locationStats, maxRevenue, userLoc, range]);
 
   return (
     <div className="space-y-8 pb-20 md:pb-12">
-      {/* Header section with context */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-slate-800">{t.analytics}</h2>
           <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Stall Performance & Spatial Data</p>
         </div>
         
-        {/* Date Range Selector Bar */}
         <div className="bg-white p-1.5 rounded-[20px] border border-slate-100 shadow-sm flex items-center gap-1">
           <button 
             onClick={() => setRange('today')}
@@ -180,7 +240,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         </div>
       </div>
 
-      {/* Primary Metrics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <div className="dashboard-card p-6 bg-blue-600 text-white border-0 shadow-lg shadow-blue-100 flex flex-col justify-between">
           <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest mb-1">{t.revenue}</p>
@@ -217,28 +276,30 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         </div>
       </div>
 
-      {/* Main Insights section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Proportional Symbol Map */}
         <div className="dashboard-card overflow-hidden lg:col-span-8 h-[500px] flex flex-col group">
           <div className="p-4 px-6 border-b border-slate-50 flex justify-between items-center bg-white shrink-0 z-10">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Transaction Density Map</h3>
-              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Dot size indicates revenue scale</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Spatial concentration of sales</p>
             </div>
             <div className="flex gap-2">
               <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span className="text-[9px] font-bold text-slate-500 uppercase">Revenue</span>
+                <span className="text-[9px] font-bold text-slate-500 uppercase">Revenue Volume</span>
               </div>
             </div>
           </div>
-          <div className="flex-1 min-h-0 relative">
+          <div className="flex-1 min-h-[300px] relative bg-slate-50">
             <div id="analytics-map" className="h-full w-full grayscale-[0.2] contrast-[1.1]"></div>
+            {locationStats.length === 0 && !userLoc && (
+              <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-[2px] z-10">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-white px-4 py-2 rounded-full shadow-sm">Acquiring Location Context...</p>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Top Products sidebar */}
         <div className="dashboard-card p-6 lg:col-span-4 h-[500px] flex flex-col">
           <div className="flex justify-between items-center mb-8 shrink-0">
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">{t.bestSellers}</h3>
@@ -282,13 +343,12 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           </div>
         </div>
 
-        {/* Temporal trend full width */}
         <div className="dashboard-card p-6 lg:col-span-12 h-[400px] flex flex-col">
           <div className="flex justify-between items-center mb-8 shrink-0">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Revenue Velocity</h3>
               <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                {range === 'today' ? 'Real-time hourly breakdown' : 'Historical aggregate by hour'} (00:00 - 23:00)
+                {range === 'today' ? 'Real-time hourly breakdown' : 'Historical aggregate by hour'}
               </p>
             </div>
             <div className="flex items-center gap-4">

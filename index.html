@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StallMaster POS</title>
+    <title>StallMate</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
@@ -29,7 +28,6 @@
             transition: all 0.3s ease;
         }
         #analytics-map {
-            height: 300px;
             width: 100%;
             border-radius: 1rem;
             z-index: 1;
@@ -42,50 +40,98 @@
             50% { opacity: .5; }
         }
 
-        /* DARK MODE UI REPLACEMENT */
+        /* DARK MODE UI REPLACEMENT - ENHANCED CONTRAST */
         .dark-mode {
-            background-color: #0f172a !important; /* slate-900 */
-            color: #f1f5f9 !important;
+            background-color: #020617 !important; /* Deepest blue/slate (950) */
+            color: #f8fafc !important; /* slate-50 */
         }
         .dark-mode .bg-white, 
         .dark-mode .bg-slate-50, 
         .dark-mode .bg-slate-100 {
-            background-color: #1e293b !important; /* slate-800 */
-            border-color: #334155 !important; /* slate-700 */
+            background-color: #0f172a !important; /* Primary surface (slate-900) */
+            border-color: #1e293b !important; /* slate-800 */
+        }
+        .dark-mode .bg-slate-200, .dark-mode .bg-slate-300 {
+            background-color: #1e293b !important; /* Elevated surface (slate-800) */
         }
         .dark-mode .text-slate-800, 
         .dark-mode .text-slate-900, 
         .dark-mode .text-slate-700 {
-            color: #f1f5f9 !important; 
+            color: #f8fafc !important; 
         }
         .dark-mode .text-slate-400, 
         .dark-mode .text-slate-500,
         .dark-mode .text-slate-600 {
-            color: #94a3b8 !important; /* slate-400 */
+            color: #cbd5e1 !important; /* Brighter secondary text (slate-300) for contrast */
         }
         .dark-mode .dashboard-card {
-            background: #1e293b !important;
-            border: 1px solid #334155 !important;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            background: #0f172a !important;
+            border: 1px solid #1e293b !important;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
         }
+        .dark-mode .border-slate-50,
         .dark-mode .border-slate-100,
         .dark-mode .border-slate-200 {
-            border-color: #334155 !important;
+            border-color: #1e293b !important;
         }
         .dark-mode input, .dark-mode select, .dark-mode textarea {
-            background-color: #0f172a !important;
-            border-color: #334155 !important;
-            color: #f1f5f9 !important;
+            background-color: #020617 !important;
+            border-color: #1e293b !important;
+            color: #f8fafc !important;
         }
-        .dark-mode .bg-blue-50 {
-            background-color: rgba(30, 58, 138, 0.3) !important;
+        /* Specific accent fixes for dark mode */
+        .dark-mode .bg-blue-50 { background-color: rgba(37, 99, 235, 0.15) !important; }
+        .dark-mode .bg-emerald-50 { background-color: rgba(5, 150, 105, 0.15) !important; }
+        .dark-mode .bg-red-50 { background-color: rgba(220, 38, 38, 0.15) !important; }
+        .dark-mode .bg-amber-50 { background-color: rgba(217, 119, 6, 0.15) !important; }
+        
+        .dark-mode .text-blue-600 { color: #60a5fa !important; }
+        .dark-mode .text-emerald-600 { color: #34d399 !important; }
+        .dark-mode .text-red-600 { color: #f87171 !important; }
+        .dark-mode .text-amber-600 { color: #fbbf24 !important; }
+
+        /* Override bright shadows in dark mode */
+        .dark-mode .shadow-blue-100, 
+        .dark-mode .shadow-blue-200, 
+        .dark-mode .shadow-emerald-100, 
+        .dark-mode .shadow-slate-100, 
+        .dark-mode .shadow-slate-200 {
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.6) !important;
         }
-        .dark-mode .text-blue-600 {
-            color: #60a5fa !important;
-        }
-        /* Leaflet Dark Theme adjustment */
+
+        /* Leaflet Dark Theme adjustment - Improved */
         .dark-mode #analytics-map {
-            filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+            filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(110%);
+        }
+        .custom-map-popup .leaflet-popup-content-wrapper {
+            background: white;
+            border-radius: 1rem;
+            padding: 0;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .dark-mode .custom-map-popup .leaflet-popup-content-wrapper {
+            background: #1e293b;
+            color: white;
+            border: 1px solid #334155;
+        }
+        .dark-mode .custom-map-popup .leaflet-popup-tip {
+            background: #1e293b;
+        }
+        
+        /* Custom Scrollbar for better dark mode visibility */
+        .dark-mode ::-webkit-scrollbar {
+            width: 8px;
+        }
+        .dark-mode ::-webkit-scrollbar-track {
+            background: #020617;
+        }
+        .dark-mode ::-webkit-scrollbar-thumb {
+            background: #1e293b;
+            border-radius: 10px;
+        }
+        .dark-mode ::-webkit-scrollbar-thumb:hover {
+            background: #334155;
         }
     </style>
 <script type="importmap">

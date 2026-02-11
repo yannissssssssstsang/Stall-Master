@@ -1,6 +1,6 @@
 
 /**
- * Gmail Service for StallMaster POS
+ * Gmail Service for StallMate
  */
 import { Transaction, Language } from '../types';
 
@@ -35,7 +35,7 @@ export const sendReceiptEmail = async (transaction: Transaction, to: string, lan
     return false;
   }
 
-  const title = lang === 'zh' ? '您的收據 - 市集管家' : 'Your Receipt - StallMaster';
+  const title = lang === 'zh' ? '您的收據 - 揸流攤' : 'Your Receipt - StallMate';
   
   const itemsHtml = transaction.items.map(item => `
     <tr>
@@ -51,7 +51,7 @@ export const sendReceiptEmail = async (transaction: Transaction, to: string, lan
   const body = `
     <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #f0f0f0; border-radius: 20px;">
       <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #2563eb; margin-bottom: 5px;">${lang === 'zh' ? '市集管家' : 'StallMaster'}</h1>
+        <h1 style="color: #2563eb; margin-bottom: 5px;">${lang === 'zh' ? '揸流攤' : 'StallMate'}</h1>
         <p style="color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">
           ${lang === 'zh' ? '智能零售收據' : 'Smart Retail Receipt'}
         </p>

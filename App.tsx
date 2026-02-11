@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
@@ -57,28 +56,45 @@ const App: React.FC = () => {
   const [tokenClient, setTokenClient] = useState<any>(null);
 
   useEffect(() => {
-    const initGsi = () => {
-      if (typeof google !== 'undefined') {
-        try {
-          const client = google.accounts.oauth2.initTokenClient({
-            client_id: GOOGLE_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
-            callback: (tokenResponse: any) => {
-              if (tokenResponse && tokenResponse.access_token) {
-                localStorage.setItem('google_access_token', tokenResponse.access_token);
-                (window as any).google_access_token = tokenResponse.access_token;
-                setIsLoggedIn(true);
-                localStorage.setItem('stall_logged_in', 'true');
-              }
-            },
-            error_callback: (err: any) => console.error("GSI Error:", err)
-          });
-          setTokenClient(client);
-        } catch (err) {
-          console.error("GSI Init Error:", err);
-        }
+    localStorage.setItem('stall_products', JSON.stringify(products));
+  }, [products]);
+
+  useEffect(() => {
+    localStorage.setItem('stall_transactions', JSON.stringify(transactions));
+  }, [transactions]);
+
+  useEffect(() => {
+    localStorage.setItem('stall_payment_qrs', JSON.stringify(paymentQRCodes));
+  }, [paymentQRCodes]);
+
+  useEffect(() => {
+    localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig));
+  }, [telegramConfig]);
+
+  const initGsi = () => {
+    if (typeof google !== 'undefined') {
+      try {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: GOOGLE_CLIENT_ID,
+          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+          callback: (tokenResponse: any) => {
+            if (tokenResponse && tokenResponse.access_token) {
+              localStorage.setItem('google_access_token', tokenResponse.access_token);
+              (window as any).google_access_token = tokenResponse.access_token;
+              setIsLoggedIn(true);
+              localStorage.setItem('stall_logged_in', 'true');
+            }
+          },
+          error_callback: (err: any) => console.error("GSI Error:", err)
+        });
+        setTokenClient(client);
+      } catch (err) {
+        console.error("GSI Init Error:", err);
       }
-    };
+    }
+  };
+
+  useEffect(() => {
     if (document.readyState === 'complete') initGsi();
     else { window.addEventListener('load', initGsi); return () => window.removeEventListener('load', initGsi); }
   }, []);
@@ -150,11 +166,54 @@ const App: React.FC = () => {
   };
 
   const handleUpdateStock = (productId: string, diff: number) => {
-    setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: Math.max(0, p.stock + diff) } : p));
+    setProducts(prev => {
+      const p = prev.find(prod => prod.id === productId);
+      if (p) {
+        const updated = { ...p, stock: Math.max(0, p.stock + diff) };
+        handleUpdateProduct(updated);
+      }
+      return prev;
+    });
   };
 
   const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+    setProducts(prev => {
+      const old = prev.find(p => p.id === updatedProduct.id);
+      if (old) {
+        const newLogs: ProductChangeLog[] = [];
+        const timestamp = new Date().toISOString();
+        if (old.price !== updatedProduct.price) {
+          newLogs.push({
+            id: Math.random().toString(36).substr(2, 9),
+            productId: old.id,
+            productName: updatedProduct.name,
+            field: 'price',
+            oldValue: old.price,
+            newValue: updatedProduct.price,
+            timestamp
+          });
+        }
+        if (old.stock !== updatedProduct.stock) {
+          newLogs.push({
+            id: Math.random().toString(36).substr(2, 9),
+            productId: old.id,
+            productName: updatedProduct.name,
+            field: 'stock',
+            oldValue: old.stock,
+            newValue: updatedProduct.stock,
+            timestamp
+          });
+        }
+        if (newLogs.length > 0) {
+          setChangeLogs(prevLogs => {
+            const updatedLogs = [...newLogs, ...prevLogs].slice(0, 100);
+            localStorage.setItem('stall_change_logs', JSON.stringify(updatedLogs));
+            return updatedLogs;
+          });
+        }
+      }
+      return prev.map(p => p.id === updatedProduct.id ? updatedProduct : p);
+    });
     requestSync();
   };
 

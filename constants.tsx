@@ -4,7 +4,7 @@ import { Language } from './types';
 
 export const TRANSLATIONS = {
   [Language.EN]: {
-    appName: 'StallMaster',
+    appName: 'StallMate',
     ordering: 'Ordering',
     inventory: 'Inventory',
     analytics: 'Analytics',
@@ -51,7 +51,7 @@ export const TRANSLATIONS = {
     newCustomers: 'New Customers'
   },
   [Language.ZH]: {
-    appName: '市集管家',
+    appName: '揸流攤',
     ordering: '點餐系統',
     inventory: '庫存管理',
     analytics: '數據分析',

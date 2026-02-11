@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { Product, Language, ProductChangeLog } from '../types';
 import { TRANSLATIONS } from '../constants';
@@ -42,6 +41,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
   const [processingProgress, setProcessingProgress] = useState({ current: 0, total: 0, message: '' });
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [selectedDriveItems, setSelectedDriveItems] = useState<string[]>([]);
   const [swipedId, setSwipedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,7 +94,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
           const productData = {
             price: parseFloat(row.Price || row['價格'] || row['單價'] || 0),
             cost: parseFloat(row.Cost || row['成本'] || 0),
-            stock: parseInt(row.Stock || row['庫存'] || 0),
+            stock: parseInt(row.Stock || row['庫庫存'] || 0),
             category: String(row.Category || row['分類'] || '').trim()
           };
 
@@ -189,7 +189,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
     const diffX = touchStartRef.current.x - currentX;
     const diffY = Math.abs(touchStartRef.current.y - currentY);
 
-    // Determine swipe direction once
     if (isHorizontalSwipe.current === null) {
       if (Math.abs(diffX) > 10) {
         isHorizontalSwipe.current = Math.abs(diffX) > diffY;
@@ -197,7 +196,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
     }
 
     if (isHorizontalSwipe.current) {
-      // Swipe left to reveal delete (diffX > 0)
       if (diffX > 50) {
         setSwipedId(id);
       } else if (diffX < -50) {
@@ -221,7 +219,6 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
     p.category?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Close swipe on scroll or click outside
   useEffect(() => {
     const handleGlobalClick = () => setSwipedId(null);
     window.addEventListener('click', handleGlobalClick);
@@ -236,6 +233,13 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Smart Stock & Data Integration</p>
         </div>
         <div className="flex gap-2 w-full sm:w-auto">
+          <button 
+            onClick={() => setShowHistory(true)}
+            className="w-12 h-12 bg-white border border-slate-100 rounded-xl text-slate-400 flex items-center justify-center hover:text-blue-600 hover:bg-blue-50 transition-all shadow-sm active:scale-95"
+            title={t.history}
+          >
+            <i className="fas fa-clock-rotate-left"></i>
+          </button>
           <div className="relative flex-1 sm:w-64">
             <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 text-xs"></i>
             <input 
@@ -443,6 +447,57 @@ const InventoryView: React.FC<InventoryViewProps> = ({ products, lang, onAddProd
               >
                 Import Selected ({selectedDriveItems.length})
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHistory && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-end md:items-center justify-center p-4" onClick={() => setShowHistory(false)}>
+          <div className="bg-white w-full max-w-lg rounded-[48px] p-8 shadow-2xl animate-scale-in max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6 shrink-0">
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{t.history}</h3>
+              <button onClick={() => setShowHistory(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-3">
+              {changeLogs.length > 0 ? (
+                changeLogs.map(log => (
+                  <div key={log.id} className="p-4 bg-slate-50 border border-slate-100 rounded-3xl flex items-start gap-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${log.field === 'price' ? 'bg-blue-50 text-blue-500' : 'bg-amber-50 text-amber-500'}`}>
+                      <i className={`fas ${log.field === 'price' ? 'fa-tag' : 'fa-box-open'} text-xs`}></i>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-sm font-black text-slate-800 truncate uppercase tracking-tight">{log.productName}</p>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase whitespace-nowrap ml-2">
+                          {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          {log.field === 'price' ? t.priceModified : t.stockModified}
+                        </span>
+                        <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-0.5 rounded-lg">
+                          <span className="text-[10px] font-bold text-slate-400">{log.oldValue}</span>
+                          <i className="fas fa-arrow-right text-[8px] text-slate-300"></i>
+                          <span className={`text-[10px] font-black ${log.newValue > log.oldValue ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {log.newValue}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[8px] font-bold text-slate-300 uppercase tracking-tighter mt-1">
+                        {new Date(log.timestamp).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-20 opacity-30">
+                  <i className="fas fa-clock-rotate-left text-5xl mb-4"></i>
+                  <p className="font-black uppercase tracking-widest text-xs">No edit history yet</p>
+                </div>
+              )}
             </div>
           </div>
         </div>

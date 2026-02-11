@@ -1,5 +1,5 @@
 {
-  "name": "StallMaster POS",
+  "name": "StallMate",
   "description": "A comprehensive mobile-first Market Stall POS system featuring AI-powered inventory extraction, real-time analytics, and multi-payment QR support.",
   "requestFramePermissions": [
     "camera",

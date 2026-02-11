@@ -31,7 +31,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
           </div>
           <div className="space-y-2">
             <h1 className="text-5xl font-black tracking-tighter text-slate-900">
-              {lang === Language.ZH ? '市集管家' : 'StallMaster'}
+              {lang === Language.ZH ? '揸流攤' : 'StallMate'}
             </h1>
             <p className="text-sm font-bold text-blue-600 uppercase tracking-[0.4em]">
               {lang === Language.ZH ? '智能零售生態系統' : 'Intelligent Retail Ecosystem'}
@@ -59,7 +59,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
             onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
             className="w-full p-6 rounded-[28px] font-black uppercase tracking-[0.2em] text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all border border-transparent hover:border-blue-100"
           >
-            {lang === Language.EN ? 'Switch to 繁體中文' : '切換為 English'}
+            {lang === Language.EN ? '切換為 揸流攤' : 'Switch to StallMate'}
           </button>
         </div>
 

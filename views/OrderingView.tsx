@@ -1,5 +1,4 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Product, CartItem, Language, Transaction, PaymentQRCodes } from '../types';
 import { TRANSLATIONS } from '../constants';
 import { sendReceiptEmail } from '../services/gmailService';
@@ -25,6 +24,39 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isEmailSent, setIsEmailSent] = useState(false);
+  
+  // Geolocation state
+  const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [isLocationLocked, setIsLocationLocked] = useState(false);
+
+  useEffect(() => {
+    let watchId: number | null = null;
+
+    if (isCheckoutOpen && navigator.geolocation) {
+      setIsLocationLocked(false);
+      // Use watchPosition for better real-time accuracy while the modal is open
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          setCurrentCoords({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+          setIsLocationLocked(true);
+        },
+        (error) => {
+          console.warn("Geolocation watch failed", error);
+          setIsLocationLocked(false);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      );
+    }
+
+    return () => {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [isCheckoutOpen]);
 
   const availableProducts = useMemo(() => products.filter(p => !p.isExtracting), [products]);
 
@@ -90,7 +122,8 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
       total: cartTotal,
       paymentMethod: selectedPayment!,
       profit: cartProfit,
-      customerEmail: (emailSent && customerEmail) ? customerEmail : undefined
+      customerEmail: (emailSent && customerEmail) ? customerEmail : undefined,
+      location: currentCoords ? { ...currentCoords, name: 'Stall Transaction' } : undefined
     };
 
     if (emailSent) {
@@ -116,6 +149,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
     setShowEmailInput(false);
     setCustomerEmail('');
     setIsEmailSent(false);
+    setCurrentCoords(null);
   };
 
   const groupedProducts = useMemo(() => {
@@ -194,7 +228,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
             {!showReceiptChoice ? (
               <div className="space-y-6">
-                {/* Order Summary List - Redesigned to remove per-item totals and larger quantity buttons */}
+                {/* Order Summary List */}
                 <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                   {cart.map(item => (
                     <div key={item.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-3xl border border-slate-100">
@@ -222,7 +256,13 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                 </div>
 
                 <div className="flex justify-between items-center px-4 pt-4 border-t border-slate-100">
-                  <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{t.total}</span>
+                  <div className="flex flex-col">
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{t.total}</span>
+                    <div className="flex items-center gap-2 mt-1">
+                      <i className={`fas fa-location-dot text-[10px] ${isLocationLocked ? 'text-emerald-500' : 'text-slate-300 animate-pulse'}`}></i>
+                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{isLocationLocked ? 'Geo-Locked' : 'Acquiring GPS...'}</span>
+                    </div>
+                  </div>
                   <span className="text-4xl font-black text-blue-600">${cartTotal.toFixed(1)}</span>
                 </div>
 
@@ -247,7 +287,6 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                   ))}
                 </div>
 
-                {/* Redesigned SCAN TO PAY layout - Full width and maximized for scanning */}
                 {selectedPayment && selectedPayment !== 'CASH' && (
                   <div className="flex flex-col items-center gap-4 p-4 md:p-6 bg-slate-900 rounded-[40px] animate-scale-in shadow-2xl border border-slate-800">
                     <div className="flex items-center gap-2">
