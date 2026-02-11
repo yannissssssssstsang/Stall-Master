@@ -54,6 +54,15 @@ export interface Transaction {
   };
 }
 
+export interface ReceiptConfig {
+  logo?: string;
+  businessCard?: string;
+  companyName: string;
+  address: string;
+  phone: string;
+  email: string;
+}
+
 export interface DailyReport {
   date: string;
   transactions: Transaction[];

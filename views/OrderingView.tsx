@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
-import { Product, CartItem, Language, Transaction, PaymentQRCodes } from '../types';
+import { Product, CartItem, Language, Transaction, PaymentQRCodes, ReceiptConfig } from '../types';
 import { TRANSLATIONS } from '../constants';
 import { sendReceiptEmail } from '../services/gmailService';
 
@@ -9,9 +10,10 @@ interface OrderingViewProps {
   onCompleteSale: (transaction: Transaction) => void;
   updateStock: (productId: string, quantity: number) => void;
   customQRCodes?: PaymentQRCodes;
+  receiptConfig?: ReceiptConfig;
 }
 
-const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteSale, updateStock, customQRCodes = {} }) => {
+const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteSale, updateStock, customQRCodes = {}, receiptConfig }) => {
   const t = TRANSLATIONS[lang];
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
@@ -24,67 +26,42 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   const [emailError, setEmailError] = useState<string | null>(null);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [isEmailSent, setIsEmailSent] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
   
-  // Geolocation state
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocationLocked, setIsLocationLocked] = useState(false);
 
   useEffect(() => {
     let watchId: number | null = null;
-
     if (isCheckoutOpen && navigator.geolocation) {
       setIsLocationLocked(false);
-      // Use watchPosition for better real-time accuracy while the modal is open
       watchId = navigator.geolocation.watchPosition(
         (position) => {
-          setCurrentCoords({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
+          setCurrentCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
           setIsLocationLocked(true);
         },
-        (error) => {
-          console.warn("Geolocation watch failed", error);
-          setIsLocationLocked(false);
-        },
+        (error) => { console.warn("Geolocation failed", error); setIsLocationLocked(false); },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
-
-    return () => {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-      }
-    };
+    return () => { if (watchId !== null) navigator.geolocation.clearWatch(watchId); };
   }, [isCheckoutOpen]);
 
   const availableProducts = useMemo(() => products.filter(p => !p.isExtracting), [products]);
 
   const availablePaymentMethods = useMemo(() => {
     const methods = ['CASH'];
-    Object.keys(customQRCodes).forEach(key => {
-      if (customQRCodes[key]) {
-        methods.push(key);
-      }
-    });
+    Object.keys(customQRCodes).forEach(key => { if (customQRCodes[key]) methods.push(key); });
     return methods;
   }, [customQRCodes]);
-
-  const getCategoryColor = (cat: string) => {
-    const categoryName = String(cat || '');
-    if (!categoryName || categoryName === (lang === Language.ZH ? '未分類' : 'Uncategorized')) return 'bg-slate-100 text-slate-500 border-slate-200';
-    let hash = 0;
-    for (let i = 0; i < categoryName.length; i++) hash = categoryName.charCodeAt(i) + ((hash << 5) - hash);
-    const colors = ['bg-blue-50 text-blue-600 border-blue-100', 'bg-emerald-50 text-emerald-600 border-emerald-100', 'bg-purple-50 text-purple-600 border-purple-100', 'bg-amber-50 text-amber-600 border-amber-100', 'bg-rose-50 text-rose-600 border-rose-100'];
-    return colors[Math.abs(hash) % colors.length];
-  };
 
   const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setCustomerEmail(val);
-    setEmailError((val && !validateEmail(val)) ? (lang === Language.ZH ? '請輸入有效的電子郵件地址' : 'Please enter a valid email address') : null);
+    setApiError(null);
+    setEmailError((val && !validateEmail(val)) ? (lang === Language.ZH ? '請輸入有效的電子郵件' : 'Invalid email') : null);
   };
 
   const addToCart = (product: Product) => {
@@ -114,6 +91,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
   const finalizeTransaction = async (emailSent: boolean = false) => {
     if (emailSent && !validateEmail(customerEmail)) return;
+    setApiError(null);
 
     const transaction: Transaction = {
       id: Math.random().toString(36).substr(2, 9),
@@ -128,18 +106,29 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
 
     if (emailSent) {
       setIsSendingEmail(true);
-      const success = await sendReceiptEmail(transaction, customerEmail, lang);
-      setIsSendingEmail(false);
-      
-      if (success) {
-        setIsEmailSent(true);
-        await new Promise(resolve => setTimeout(resolve, 1500));
-      } else {
-        alert(lang === Language.ZH ? '電郵發送失敗，請檢查權限設置。' : 'Email failed to send. Please check your permissions.');
+      try {
+        const result = await sendReceiptEmail(transaction, customerEmail, lang, receiptConfig);
+        if (result.success) {
+          setIsEmailSent(true);
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        } else {
+          let msg = lang === Language.ZH ? '發送失敗' : 'Failed to send';
+          if (result.error === 'TOKEN_EXPIRED') msg = lang === Language.ZH ? 'Session 已過期，請重新登錄' : 'Session expired. Please re-login.';
+          else if (result.error === 'NO_TOKEN') msg = lang === Language.ZH ? '找不到授權' : 'No authorization token.';
+          else if (result.error) msg = result.error;
+          
+          setApiError(msg);
+          return; // Exit if email fails so user can retry or skip
+        }
+      } catch (err) {
+        setApiError(lang === Language.ZH ? '網絡錯誤' : 'Network Error');
         return;
+      } finally {
+        setIsSendingEmail(false);
       }
     }
 
+    // Success path
     onCompleteSale(transaction);
     cart.forEach(item => updateStock(item.id, -item.quantity));
     setCart([]);
@@ -149,6 +138,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
     setShowEmailInput(false);
     setCustomerEmail('');
     setIsEmailSent(false);
+    setApiError(null);
     setCurrentCoords(null);
   };
 
@@ -166,14 +156,19 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   return (
     <div className="space-y-8 pb-32 md:pb-8">
       {categories.map((category) => {
-        const catColor = getCategoryColor(category);
-        const catTextColor = catColor.split(' ')[1];
+        const catColor = (cat: string) => {
+          let hash = 0;
+          for (let i = 0; i < cat.length; i++) hash = cat.charCodeAt(i) + ((hash << 5) - hash);
+          const colors = ['bg-blue-50 text-blue-600 border-blue-100', 'bg-emerald-50 text-emerald-600 border-emerald-100', 'bg-purple-50 text-purple-600 border-purple-100', 'bg-amber-50 text-amber-600 border-amber-100', 'bg-rose-50 text-rose-600 border-rose-100'];
+          return colors[Math.abs(hash) % colors.length];
+        };
+        const colorClass = catColor(category);
         return (
           <div key={category} className="space-y-4">
-            <button onClick={() => setCollapsedCategories(prev => ({...prev, [category]: !prev[category]}))} className={`w-full flex justify-between items-center p-4 rounded-2xl border ${catColor} shadow-sm`}>
+            <button onClick={() => setCollapsedCategories(prev => ({...prev, [category]: !prev[category]}))} className={`w-full flex justify-between items-center p-4 rounded-2xl border ${colorClass} shadow-sm`}>
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-white shadow-sm"><i className={`fas fa-layer-group text-xs ${catTextColor}`}></i></div>
-                <div className="text-left"><h2 className="text-xs font-black uppercase tracking-[0.2em]">{category}</h2><span className="text-[9px] font-bold opacity-70 uppercase">{groupedProducts[category].length} Products</span></div>
+                <i className="fas fa-layer-group text-xs opacity-50"></i>
+                <h2 className="text-xs font-black uppercase tracking-widest">{category}</h2>
               </div>
               <i className={`fas fa-chevron-down text-xs transition-transform ${collapsedCategories[category] ? '-rotate-90' : ''}`}></i>
             </button>
@@ -201,8 +196,6 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
         );
       })}
 
-      {availableProducts.length === 0 && <div className="text-center py-24 bg-white rounded-3xl border border-dashed border-slate-200"><i className="fas fa-box-open text-slate-200 text-4xl mb-4"></i><p className="font-bold text-slate-400">All items are either out of stock or being scanned.</p></div>}
-      
       {cart.length > 0 && (
         <div className="fixed bottom-20 md:bottom-8 left-4 right-4 md:left-auto md:right-8 md:w-96 z-[100] animate-scale-in">
           <button onClick={() => setIsCheckoutOpen(true)} className="w-full bg-blue-600 text-white p-5 rounded-[24px] shadow-2xl shadow-blue-200 flex justify-between items-center font-black hover:bg-blue-700 transition-all group">
@@ -212,7 +205,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xl">${cartTotal.toFixed(1)}</span>
-              <i className="fas fa-arrow-right text-xs group-hover:translate-x-1 transition-transform"></i>
+              <i className="fas fa-arrow-right text-xs"></i>
             </div>
           </button>
         </div>
@@ -222,96 +215,57 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-end md:items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg rounded-[48px] p-6 md:p-8 shadow-2xl animate-scale-in max-h-[95vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{showReceiptChoice ? 'Transaction Complete' : 'Order Summary'}</h3>
+              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{showReceiptChoice ? 'Record Status' : 'Order Summary'}</h3>
               <button onClick={() => setIsCheckoutOpen(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
             </div>
 
             {!showReceiptChoice ? (
               <div className="space-y-6">
-                {/* Order Summary List */}
                 <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                   {cart.map(item => (
                     <div key={item.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-3xl border border-slate-100">
                       <div className="flex flex-col flex-1 min-w-0 mr-4">
                         <span className="text-sm font-black text-slate-800 uppercase tracking-tight truncate">{item.name}</span>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">${item.price} / unit</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">${item.price}</span>
                       </div>
                       <div className="flex items-center bg-white rounded-full p-1 border border-slate-200 shadow-sm">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }} 
-                          className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:bg-red-50 hover:text-red-600 active:scale-90 transition-all"
-                        >
-                          <i className="fas fa-minus text-[12px]"></i>
-                        </button>
-                        <span className="w-10 text-center text-base font-black text-slate-700">{item.quantity}</span>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); addToCart(item); }} 
-                          className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white hover:bg-blue-700 active:scale-90 transition-all shadow-md shadow-blue-100"
-                        >
-                          <i className="fas fa-plus text-[12px]"></i>
-                        </button>
+                        <button onClick={() => removeFromCart(item.id)} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 hover:text-red-600"><i className="fas fa-minus text-[10px]"></i></button>
+                        <span className="w-8 text-center text-sm font-black text-slate-700">{item.quantity}</span>
+                        <button onClick={() => addToCart(item)} className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white"><i className="fas fa-plus text-[10px]"></i></button>
                       </div>
                     </div>
                   ))}
                 </div>
 
                 <div className="flex justify-between items-center px-4 pt-4 border-t border-slate-100">
-                  <div className="flex flex-col">
-                    <span className="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">{t.total}</span>
-                    <div className="flex items-center gap-2 mt-1">
-                      <i className={`fas fa-location-dot text-[10px] ${isLocationLocked ? 'text-emerald-500' : 'text-slate-300 animate-pulse'}`}></i>
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">{isLocationLocked ? 'Geo-Locked' : 'Acquiring GPS...'}</span>
-                    </div>
-                  </div>
-                  <span className="text-4xl font-black text-blue-600">${cartTotal.toFixed(1)}</span>
+                   <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{t.total}</span>
+                   <span className="text-3xl font-black text-blue-600">${cartTotal.toFixed(1)}</span>
                 </div>
 
-                {/* Payment Method Selector Grid */}
                 <div className="grid grid-cols-2 gap-3">
                   {availablePaymentMethods.map(method => (
-                    <button 
-                      key={method}
-                      onClick={() => setSelectedPayment(method)}
-                      className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${selectedPayment === method ? 'border-blue-600 bg-blue-50/50' : 'border-slate-50 hover:border-slate-100'}`}
-                    >
-                      <i className={`fas ${
-                        method === 'CASH' ? 'fa-money-bill-wave' : 
-                        method === 'PAYME' ? 'fa-qrcode' :
-                        method === 'ALIPAY' ? 'fa-mobile-screen' : 
-                        method === 'FPS' ? 'fa-bolt' : 'fa-wallet'
-                      } ${selectedPayment === method ? 'text-blue-600' : 'text-slate-300'}`}></i>
-                      <span className={`text-[10px] font-black uppercase tracking-widest ${selectedPayment === method ? 'text-blue-600' : 'text-slate-400'}`}>
-                        {method === 'CASH' ? t.cash : (t[method.toLowerCase() as keyof typeof t] || method)}
-                      </span>
+                    <button key={method} onClick={() => setSelectedPayment(method)} className={`p-4 rounded-2xl border-2 transition-all flex flex-col items-center gap-2 ${selectedPayment === method ? 'border-blue-600 bg-blue-50/50' : 'border-slate-50'}`}>
+                      <i className={`fas ${method === 'CASH' ? 'fa-money-bill-wave' : 'fa-qrcode'} ${selectedPayment === method ? 'text-blue-600' : 'text-slate-300'}`}></i>
+                      <span className="text-[10px] font-black uppercase tracking-widest">{method}</span>
                     </button>
                   ))}
                 </div>
 
-                {selectedPayment && selectedPayment !== 'CASH' && (
-                  <div className="flex flex-col items-center gap-4 p-4 md:p-6 bg-slate-900 rounded-[40px] animate-scale-in shadow-2xl border border-slate-800">
-                    <div className="flex items-center gap-2">
-                       <i className="fas fa-expand text-blue-400 text-[10px]"></i>
-                       <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em]">{t.scanToPay}</p>
+                {/* QR Code Display Logic */}
+                {selectedPayment && selectedPayment !== 'CASH' && customQRCodes[selectedPayment] && (
+                  <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 flex flex-col items-center gap-4 animate-scale-in">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{t.scanToPay}</p>
+                    <div className="w-48 h-48 bg-white p-4 rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex items-center justify-center">
+                      <img src={customQRCodes[selectedPayment]} className="max-w-full max-h-full object-contain" alt="Payment QR" />
                     </div>
-                    <div className="w-full bg-white p-4 md:p-6 rounded-[32px] shadow-inner flex items-center justify-center ring-8 ring-blue-600/10">
-                      <img 
-                        src={customQRCodes[selectedPayment]} 
-                        alt="Payment QR Code" 
-                        className="w-full h-auto max-w-[400px] object-contain block mx-auto"
-                      />
-                    </div>
-                    <div className="text-center px-4">
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Scanning {selectedPayment} at ${cartTotal.toFixed(1)}</p>
+                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-600/10 rounded-full">
+                      <i className="fas fa-mobile-screen text-blue-600 text-xs"></i>
+                      <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{selectedPayment}</span>
                     </div>
                   </div>
                 )}
 
-                <button 
-                  onClick={() => setShowReceiptChoice(true)}
-                  disabled={!selectedPayment}
-                  className="w-full bg-emerald-600 text-white p-6 rounded-[24px] font-black uppercase tracking-[0.2em] shadow-xl shadow-emerald-100 disabled:opacity-50 transition-all active:scale-95 flex items-center justify-center gap-3"
-                >
-                  <i className="fas fa-check-circle"></i>
+                <button onClick={() => setShowReceiptChoice(true)} disabled={!selectedPayment} className="w-full bg-emerald-600 text-white p-6 rounded-[24px] font-black uppercase tracking-widest shadow-xl disabled:opacity-50">
                   {t.confirmPayment}
                 </button>
               </div>
@@ -319,14 +273,11 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
               <div className="space-y-6 animate-scale-in">
                 <div className="text-center py-4">
                   <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl transition-all ${isEmailSent ? 'bg-blue-600 text-white' : 'bg-emerald-100 text-emerald-600'}`}>
-                    <i className={`fas ${isEmailSent ? 'fa-paper-plane' : 'fa-check'}`}></i>
+                    <i className={`fas ${isEmailSent ? 'fa-paper-plane' : (isSendingEmail ? 'fa-spinner fa-spin' : 'fa-check')}`}></i>
                   </div>
                   <h4 className="text-slate-800 font-black text-lg uppercase tracking-tight">
-                    {isEmailSent ? 'Receipt Sent!' : 'Sale Recorded Successfully'}
+                    {isEmailSent ? 'Receipt Sent!' : (isSendingEmail ? 'Processing...' : 'Sale Recorded')}
                   </h4>
-                  <p className="text-slate-400 text-xs font-medium mt-2">
-                    {isEmailSent ? `Sent via Gmail to ${customerEmail}` : 'Would the customer like a digital receipt?'}
-                  </p>
                 </div>
 
                 {showEmailInput ? (
@@ -334,53 +285,20 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                     {!isEmailSent && (
                       <>
                         <div>
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Customer Email</label>
-                          <input 
-                            type="email" 
-                            disabled={isSendingEmail}
-                            value={customerEmail}
-                            onChange={handleEmailChange}
-                            className={`w-full p-4 bg-slate-50 border rounded-2xl font-bold outline-none focus:border-blue-500 shadow-sm transition-opacity ${isSendingEmail ? 'opacity-50' : ''} ${emailError ? 'border-red-500' : 'border-slate-100'}`}
-                            placeholder="customer@email.com"
-                          />
-                          {emailError && <p className="text-[9px] text-red-500 font-bold mt-2 ml-1">{emailError}</p>}
+                          <input type="email" disabled={isSendingEmail} value={customerEmail} onChange={handleEmailChange} className={`w-full p-4 bg-slate-50 border rounded-2xl font-bold outline-none ${emailError || apiError ? 'border-red-500' : 'border-slate-100'}`} placeholder="customer@email.com" />
+                          {(emailError || apiError) && <p className="text-[9px] text-red-500 font-bold mt-2 ml-1">{emailError || apiError}</p>}
                         </div>
-                        <button 
-                          onClick={() => finalizeTransaction(true)}
-                          disabled={!customerEmail || !!emailError || isSendingEmail}
-                          className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-100 disabled:opacity-50 flex items-center justify-center gap-3"
-                        >
-                          {isSendingEmail ? (
-                            <>
-                              <i className="fas fa-spinner fa-spin"></i>
-                              Sending...
-                            </>
-                          ) : (
-                            <>
-                              <i className="fas fa-paper-plane"></i>
-                              Send Receipt
-                            </>
-                          )}
+                        <button onClick={() => finalizeTransaction(true)} disabled={!customerEmail || !!emailError || isSendingEmail} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg disabled:opacity-50 flex items-center justify-center gap-3">
+                          {isSendingEmail ? <><i className="fas fa-spinner fa-spin"></i> Sending...</> : <><i className="fas fa-paper-plane"></i> Send Receipt</>}
                         </button>
+                        {!isSendingEmail && <button onClick={() => finalizeTransaction(false)} className="w-full text-slate-400 text-[10px] font-black uppercase tracking-widest">Skip</button>}
                       </>
                     )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-4">
-                    <button 
-                      onClick={() => setShowEmailInput(true)}
-                      className="p-5 border-2 border-slate-50 bg-slate-50 text-slate-700 rounded-[24px] font-black uppercase tracking-widest text-[10px] hover:border-blue-100 hover:bg-white transition-all flex flex-col items-center gap-3"
-                    >
-                      <i className="fas fa-envelope text-lg text-blue-500"></i>
-                      Email Receipt
-                    </button>
-                    <button 
-                      onClick={() => finalizeTransaction(false)}
-                      className="p-5 border-2 border-slate-50 bg-slate-50 text-slate-700 rounded-[24px] font-black uppercase tracking-widest text-[10px] hover:border-emerald-100 hover:bg-white transition-all flex flex-col items-center gap-3"
-                    >
-                      <i className="fas fa-ban text-lg text-slate-300"></i>
-                      No Receipt
-                    </button>
+                    <button onClick={() => setShowEmailInput(true)} className="p-5 border-2 border-slate-50 bg-slate-50 rounded-[24px] font-black uppercase tracking-widest text-[10px] flex flex-col items-center gap-3"><i className="fas fa-envelope text-lg text-blue-500"></i>Email</button>
+                    <button onClick={() => finalizeTransaction(false)} className="p-5 border-2 border-slate-50 bg-slate-50 rounded-[24px] font-black uppercase tracking-widest text-[10px] flex flex-col items-center gap-3"><i className="fas fa-ban text-lg text-slate-300"></i>None</button>
                   </div>
                 )}
               </div>

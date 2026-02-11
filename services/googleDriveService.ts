@@ -1,13 +1,20 @@
 
 /**
- * Google Drive Service for StallMaster POS
+ * Google Drive Service for StallMate
+ * Designed for Portable Shop State Architecture
  */
 
 export interface SyncData {
   products: any[];
   transactions: any[];
   reports: any[];
-  settings: any;
+  settings: {
+    lang: string;
+    telegramConfig: any;
+    paymentQRCodes: any;
+    receiptConfig: any;
+    changeLogs: any[];
+  };
 }
 
 export interface ConnectionStatus {
@@ -20,13 +27,19 @@ export interface ConnectionStatus {
   };
 }
 
+export interface SyncResult {
+  success: boolean;
+  error?: string;
+}
+
 const getAccessToken = () => {
-  // Try to find token in window globals or localStorage (set by Auth callback)
   return (window as any).google_access_token || localStorage.getItem('google_access_token');
 };
 
+const CLOUD_FOLDER_NAME = 'StallMate_Cloud_Data';
+
 /**
- * Verifies if we can actually reach Google Drive API
+ * Verifies if the Google Drive API is accessible with current token.
  */
 export const verifyGoogleConnection = async (): Promise<ConnectionStatus> => {
   const libraryLoaded = typeof (window as any).google !== 'undefined';
@@ -37,7 +50,7 @@ export const verifyGoogleConnection = async (): Promise<ConnectionStatus> => {
   }
 
   if (!token) {
-    return { ok: false, message: "No access token found. Please sign in.", details: { libraryLoaded, tokenPresent: false } };
+    return { ok: false, message: "No access token found.", details: { libraryLoaded, tokenPresent: false } };
   }
 
   try {
@@ -50,95 +63,170 @@ export const verifyGoogleConnection = async (): Promise<ConnectionStatus> => {
       return { ok: true, message: `Connected as ${data.user.displayName}`, details: { libraryLoaded, tokenPresent: true, apiResponse: data } };
     } else {
       const errorData = await response.json();
-      return { ok: false, message: `API Error: ${response.status} ${errorData.error?.message || ''}`, details: { libraryLoaded, tokenPresent: true, apiResponse: errorData } };
+      return { ok: false, message: `API Error: ${response.status}`, details: { libraryLoaded, tokenPresent: true, apiResponse: errorData } };
     }
   } catch (error: any) {
     return { ok: false, message: `Network Error: ${error.message}`, details: { libraryLoaded, tokenPresent: true } };
   }
 };
 
-export const syncToGoogleDrive = async (data: SyncData): Promise<boolean> => {
-  console.log("Initiating Google Drive Sync...", data);
-  
-  const accessToken = getAccessToken();
-  
-  if (!accessToken) {
-    console.warn("No Google Access Token found. Using mock sync for demo.");
-    // For testing purposes, we simulate progress
-    return new Promise((resolve) => setTimeout(() => resolve(true), 1500));
-  }
+/**
+ * Full cloud synchronization: Saves Inventory and Settings to Drive.
+ */
+export const syncToGoogleDrive = async (data: SyncData): Promise<SyncResult> => {
+  const token = getAccessToken();
+  if (!token) return { success: false, error: 'NO_TOKEN' };
 
   try {
-    const headers = {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    };
+    const headers = { 'Authorization': `Bearer ${token}` };
 
-    let folderId = await findFolder(headers, "StallMaster_Data");
+    // 1. Get or Create Main Application Folder
+    let folderId = await findFile(token, `name = '${CLOUD_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+    
     if (!folderId) {
-      folderId = await createFolder(headers, "StallMaster_Data");
+      const createFolderResp = await fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: CLOUD_FOLDER_NAME,
+          mimeType: 'application/vnd.google-apps.folder',
+        })
+      });
+      if (!createFolderResp.ok) throw new Error('FOLDER_CREATION_FAILED');
+      const folderData = await createFolderResp.json();
+      folderId = folderData.id;
     }
 
+    // 2. Parallel upload of all data registries (Inventory includes item images, Settings includes logo/card)
     await Promise.all([
-      updateOrCreateFile(headers, folderId, "inventory.json", data.products),
-      updateOrCreateFile(headers, folderId, "transactions.json", data.transactions),
-      updateOrCreateFile(headers, folderId, "daily_reports.json", data.reports)
+      updateOrCreateFile(token, folderId!, "inventory.json", data.products),
+      updateOrCreateFile(token, folderId!, "transactions.json", data.transactions),
+      updateOrCreateFile(token, folderId!, "daily_reports.json", data.reports),
+      updateOrCreateFile(token, folderId!, "settings.json", data.settings)
     ]);
 
-    return true;
-  } catch (error) {
-    console.error("Google Drive Sync Failed:", error);
-    return false;
+    return { success: true };
+  } catch (error: any) {
+    console.error("Cloud Sync Error:", error);
+    if (error.message === 'UNAUTHORIZED') return { success: false, error: 'UNAUTHORIZED' };
+    return { success: false, error: error.message };
   }
 };
 
-const findFolder = async (headers: any, folderName: string) => {
-  const query = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`, { headers });
-  const result = await response.json();
-  return result.files?.length > 0 ? result.files[0].id : null;
+/**
+ * Cloud Retrieval: Reconstructs local state from Drive JSON files.
+ */
+export const downloadFromGoogleDrive = async (): Promise<{ success: boolean; data?: SyncData; error?: string }> => {
+  const token = getAccessToken();
+  if (!token) return { success: false, error: 'NO_TOKEN' };
+
+  try {
+    const folderId = await findFile(token, `name = '${CLOUD_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
+    if (!folderId) return { success: false, error: 'FOLDER_NOT_FOUND' };
+
+    // Fetch all registries in parallel for speed
+    const [products, transactions, reports, settings] = await Promise.all([
+      getFileContent(token, folderId, "inventory.json"),
+      getFileContent(token, folderId, "transactions.json"),
+      getFileContent(token, folderId, "daily_reports.json"),
+      getFileContent(token, folderId, "settings.json")
+    ]);
+
+    return {
+      success: true,
+      data: {
+        products: products || [],
+        transactions: transactions || [],
+        reports: reports || [],
+        settings: settings || {
+          lang: 'en',
+          telegramConfig: { botToken: '', chatId: '', alertType: 'both' },
+          paymentQRCodes: {},
+          receiptConfig: { companyName: '', address: '', phone: '', email: '' },
+          changeLogs: []
+        }
+      }
+    };
+  } catch (error: any) {
+    console.error("Cloud Retrieval Error:", error);
+    return { success: false, error: error.message };
+  }
 };
 
-const createFolder = async (headers: any, folderName: string) => {
-  const body = {
-    name: folderName,
-    mimeType: 'application/vnd.google-apps.folder',
-  };
-  const response = await fetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+const findFile = async (token: string, query: string): Promise<string | null> => {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`, {
+    headers: { 'Authorization': `Bearer ${token}` }
   });
-  const result = await response.json();
-  return result.id;
+  if (resp.status === 401) throw new Error('UNAUTHORIZED');
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  return data.files?.length > 0 ? data.files[0].id : null;
 };
 
-const updateOrCreateFile = async (headers: any, folderId: string, fileName: string, content: any) => {
+const getFileContent = async (token: string, folderId: string, fileName: string): Promise<any> => {
   const query = `name = '${fileName}' and '${folderId}' in parents and trashed = false`;
-  const findResponse = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}`, { headers });
-  const findResult = await findResponse.json();
-  const existingFileId = findResult.files?.length > 0 ? findResult.files[0].id : null;
+  const fileId = await findFile(token, query);
+  if (!fileId) return null;
 
-  const metadata = {
-    name: fileName,
-    parents: existingFileId ? undefined : [folderId],
-  };
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (resp.ok) return await resp.json();
+  return null;
+};
 
-  const formData = new FormData();
-  formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-  formData.append('file', new Blob([JSON.stringify(content)], { type: 'application/json' }));
+const updateOrCreateFile = async (token: string, folderId: string, fileName: string, content: any) => {
+  const query = `name = '${fileName}' and '${folderId}' in parents and trashed = false`;
+  let fileId = await findFile(token, query);
 
-  if (existingFileId) {
-    await fetch(`https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`, {
-      method: 'PATCH',
-      headers: { 'Authorization': headers.Authorization },
-      body: formData,
-    });
-  } else {
-    await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+  if (!fileId) {
+    const createResp = await fetch('https://www.googleapis.com/drive/v3/files', {
       method: 'POST',
-      headers: { 'Authorization': headers.Authorization },
-      body: formData,
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fileName, parents: [folderId], mimeType: 'application/json' })
     });
+    const fileData = await createResp.json();
+    fileId = fileData.id;
   }
+
+  const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`;
+  await fetch(uploadUrl, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(content)
+  });
+};
+
+// Helper methods for Picker UI
+export const listDriveFiles = async (): Promise<{ files: any[], error?: string }> => {
+  const token = getAccessToken();
+  if (!token) return { files: [], error: "No token" };
+  const query = "(mimeType contains 'image/' or mimeType = 'application/vnd.google-apps.spreadsheet' or mimeType = 'text/csv') and trashed = false";
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,thumbnailLink,mimeType)&pageSize=50`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  const data = await resp.json();
+  return { files: data.files || [] };
+};
+
+export const getDriveFileAsBase64 = async (fileId: string): Promise<string | null> => {
+  const token = getAccessToken();
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (!resp.ok) return null;
+  const blob = await resp.blob();
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+};
+
+export const getDriveFileAsBlob = async (fileId: string): Promise<Blob | null> => {
+  const token = getAccessToken();
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  return resp.ok ? await resp.blob() : null;
 };

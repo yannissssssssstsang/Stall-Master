@@ -1,10 +1,9 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { AIExtractionResult } from "../types";
+import { AIExtractionResult, ReceiptConfig } from "../types";
 
 /**
  * Basic extraction of price, cost, and category from a product image.
- * Retries on failure and uses a streamlined prompt for faster response.
  */
 export const extractProductInfo = async (base64Image: string, retryCount = 0): Promise<AIExtractionResult | null> => {
   try {
@@ -43,6 +42,46 @@ export const extractProductInfo = async (base64Image: string, retryCount = 0): P
       return extractProductInfo(base64Image, retryCount + 1);
     }
     console.error("AI Extraction failed after retries:", error);
+    return null;
+  }
+};
+
+/**
+ * Extracts business information from a business card image.
+ */
+export const extractBusinessCardInfo = async (base64Image: string): Promise<Partial<ReceiptConfig> | null> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const mimeType = base64Image.includes(';') ? base64Image.split(';')[0].split(':')[1] : "image/jpeg";
+    const data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data } },
+          { text: "Extract business details from this business card. Required fields: companyName, address, phone, email. Return JSON only." }
+        ],
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            companyName: { type: Type.STRING },
+            address: { type: Type.STRING },
+            phone: { type: Type.STRING },
+            email: { type: Type.STRING },
+          },
+          required: ["companyName", "address", "phone", "email"],
+        },
+      },
+    });
+
+    if (!response.text) return null;
+    return JSON.parse(response.text) as Partial<ReceiptConfig>;
+  } catch (error) {
+    console.error("Business Card AI Extraction failed:", error);
     return null;
   }
 };

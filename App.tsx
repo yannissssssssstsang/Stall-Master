@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
 import OrderingView from './views/OrderingView';
@@ -7,8 +8,8 @@ import AnalyticsView from './views/AnalyticsView';
 import RecordsView from './views/RecordsView';
 import SettingsView from './views/SettingsView';
 import LandingView from './views/LandingView';
-import { Product, Language, Transaction, DailyReport, PaymentQRCodes, ProductChangeLog, TelegramConfig, SyncStatus } from './types';
-import { syncToGoogleDrive } from './services/googleDriveService';
+import { Product, Language, Transaction, DailyReport, PaymentQRCodes, ProductChangeLog, TelegramConfig, SyncStatus, ReceiptConfig } from './types';
+import { syncToGoogleDrive, downloadFromGoogleDrive } from './services/googleDriveService';
 
 declare const google: any;
 
@@ -21,255 +22,231 @@ const INITIAL_PRODUCTS: Product[] = [
 ];
 
 const App: React.FC = () => {
-  const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('stall_logged_in') === 'true');
-  const [googleToken, setGoogleToken] = useState<string | null>(localStorage.getItem('google_access_token'));
-  const [lang, setLang] = useState<Language>(Language.ZH);
+  const [googleToken, setGoogleToken] = useState<string | null>(() => {
+    return localStorage.getItem('google_access_token');
+  });
+
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    return localStorage.getItem('stall_logged_in') === 'true' || !!localStorage.getItem('google_access_token');
+  });
+
+  const [lang, setLang] = useState<Language>(() => {
+    const saved = localStorage.getItem('stall_lang');
+    return (saved as Language) || Language.EN;
+  });
+  
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(localStorage.getItem('stall_last_sync'));
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('stall_dark_mode') === 'true');
+  const [isInitialCloudLoading, setIsInitialCloudLoading] = useState(false);
 
-  const [products, setProducts] = useState<Product[]>(() => {
-    const saved = localStorage.getItem('stall_products');
-    return saved ? JSON.parse(saved) : INITIAL_PRODUCTS;
-  });
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('stall_transactions');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [reports, setReports] = useState<DailyReport[]>(() => {
-    const saved = localStorage.getItem('stall_reports');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [paymentQRCodes, setPaymentQRCodes] = useState<PaymentQRCodes>(() => {
-    const saved = localStorage.getItem('stall_payment_qrs');
-    return saved ? JSON.parse(saved) : {};
-  });
-  const [changeLogs, setChangeLogs] = useState<ProductChangeLog[]>(() => {
-    const saved = localStorage.getItem('stall_change_logs');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(() => {
-    const saved = localStorage.getItem('stall_telegram_config');
-    return saved ? JSON.parse(saved) : { botToken: '', chatId: '', alertType: 'both' };
-  });
+  const [products, setProducts] = useState<Product[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [reports, setReports] = useState<DailyReport[]>([]);
+  const [paymentQRCodes, setPaymentQRCodes] = useState<PaymentQRCodes>({});
+  const [changeLogs, setChangeLogs] = useState<ProductChangeLog[]>([]);
+  const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>({ botToken: '', chatId: '', alertType: 'both' });
+  const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig>({ companyName: '', address: '', phone: '', email: '' });
 
   const [tokenClient, setTokenClient] = useState<any>(null);
+  const isInitialMount = useRef(true);
+  const isHydrated = useRef(false);
 
   useEffect(() => {
-    localStorage.setItem('stall_products', JSON.stringify(products));
-  }, [products]);
+    const savedProducts = localStorage.getItem('stall_products');
+    const savedTransactions = localStorage.getItem('stall_transactions');
+    const savedReports = localStorage.getItem('stall_reports');
+    const savedQRs = localStorage.getItem('stall_payment_qrs');
+    const savedLogs = localStorage.getItem('stall_change_logs');
+    const savedTelegram = localStorage.getItem('stall_telegram_config');
+    const savedReceipt = localStorage.getItem('stall_receipt_config');
+
+    if (savedProducts) setProducts(JSON.parse(savedProducts));
+    else setProducts(INITIAL_PRODUCTS);
+
+    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
+    if (savedReports) setReports(JSON.parse(savedReports));
+    if (savedQRs) setPaymentQRCodes(JSON.parse(savedQRs));
+    if (savedLogs) setChangeLogs(JSON.parse(savedLogs));
+    if (savedTelegram) setTelegramConfig(JSON.parse(savedTelegram));
+    if (savedReceipt) setReceiptConfig(JSON.parse(savedReceipt));
+  }, []);
+
+  const handleCloudDownload = useCallback(async () => {
+    if (!isLoggedIn || !isOnline) return;
+    setIsInitialCloudLoading(true);
+    try {
+      const result = await downloadFromGoogleDrive();
+      if (result.success && result.data) {
+        const { products: p, transactions: t, reports: r, settings: s } = result.data;
+        if (p) setProducts(p);
+        if (t) setTransactions(t);
+        if (r) setReports(r);
+        if (s) {
+          if (s.paymentQRCodes) setPaymentQRCodes(s.paymentQRCodes);
+          if (s.telegramConfig) setTelegramConfig(s.telegramConfig);
+          if (s.receiptConfig) setReceiptConfig(s.receiptConfig);
+          if (s.lang) setLang(s.lang as Language);
+          if (s.changeLogs) setChangeLogs(s.changeLogs);
+        }
+        isHydrated.current = true;
+        setSyncStatus('synced');
+      }
+    } catch (e) {
+      console.error("Cloud restoration failed:", e);
+    } finally {
+      setIsInitialCloudLoading(false);
+    }
+  }, [isLoggedIn, isOnline]);
 
   useEffect(() => {
-    localStorage.setItem('stall_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    if (googleToken) {
+      (window as any).google_access_token = googleToken;
+      localStorage.setItem('google_access_token', googleToken);
+    }
+  }, [googleToken]);
 
-  useEffect(() => {
-    localStorage.setItem('stall_payment_qrs', JSON.stringify(paymentQRCodes));
-  }, [paymentQRCodes]);
-
-  useEffect(() => {
-    localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig));
-  }, [telegramConfig]);
+  useEffect(() => { localStorage.setItem('stall_lang', lang); }, [lang]);
+  useEffect(() => { localStorage.setItem('stall_products', JSON.stringify(products)); }, [products]);
+  useEffect(() => { localStorage.setItem('stall_transactions', JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { localStorage.setItem('stall_reports', JSON.stringify(reports)); }, [reports]);
+  useEffect(() => { localStorage.setItem('stall_change_logs', JSON.stringify(changeLogs)); }, [changeLogs]);
+  useEffect(() => { localStorage.setItem('stall_payment_qrs', JSON.stringify(paymentQRCodes)); }, [paymentQRCodes]);
+  useEffect(() => { localStorage.setItem('stall_telegram_config', JSON.stringify(telegramConfig)); }, [telegramConfig]);
+  useEffect(() => { localStorage.setItem('stall_receipt_config', JSON.stringify(receiptConfig)); }, [receiptConfig]);
 
   const initGsi = () => {
     if (typeof google !== 'undefined') {
       try {
         const client = google.accounts.oauth2.initTokenClient({
           client_id: GOOGLE_CLIENT_ID,
-          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send',
+          scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.send',
           callback: (tokenResponse: any) => {
             if (tokenResponse && tokenResponse.access_token) {
-              localStorage.setItem('google_access_token', tokenResponse.access_token);
               setGoogleToken(tokenResponse.access_token);
-              (window as any).google_access_token = tokenResponse.access_token;
               setIsLoggedIn(true);
               localStorage.setItem('stall_logged_in', 'true');
+              handleCloudDownload();
             }
-          },
-          error_callback: (err: any) => console.error("GSI Error:", err)
+          }
         });
         setTokenClient(client);
-      } catch (err) {
-        console.error("GSI Init Error:", err);
-      }
+      } catch (err) { console.error("GSI Init Error:", err); }
     }
   };
 
   useEffect(() => {
     if (document.readyState === 'complete') initGsi();
-    else { window.addEventListener('load', initGsi); return () => window.removeEventListener('load', initGsi); }
+    else window.addEventListener('load', initGsi);
+    return () => window.removeEventListener('load', initGsi);
   }, []);
 
-  const handleLogin = () => {
-    if (tokenClient && !GOOGLE_CLIENT_ID.startsWith('YOUR_CLIENT')) {
-      tokenClient.requestAccessToken();
-    } else {
-      setIsLoggedIn(true);
-      localStorage.setItem('stall_logged_in', 'true');
-      setGoogleToken('demo_token');
+  useEffect(() => {
+    if (isLoggedIn && isOnline && !isHydrated.current) {
+      handleCloudDownload();
     }
+  }, [isLoggedIn, isOnline, handleCloudDownload]);
+
+  const handleLogin = () => {
+    if (tokenClient) tokenClient.requestAccessToken();
+    else { setIsLoggedIn(true); localStorage.setItem('stall_logged_in', 'true'); }
   };
 
-  const handleLogout = () => {
+  // Safe reset for token expiry - preserves local state
+  const handleTokenExpiry = useCallback(() => {
+    setGoogleToken(null);
+    setIsLoggedIn(false);
+    localStorage.removeItem('google_access_token');
+    localStorage.removeItem('stall_logged_in');
+    if ((window as any).google_access_token) delete (window as any).google_access_token;
+  }, []);
+
+  const handleLogout = useCallback(() => {
     setIsLoggedIn(false);
     setGoogleToken(null);
-    localStorage.setItem('stall_logged_in', 'false');
-    localStorage.removeItem('google_access_token');
+    localStorage.clear();
+    setProducts(INITIAL_PRODUCTS);
+    setTransactions([]);
+    setReports([]);
+    isHydrated.current = false;
     if ((window as any).google_access_token) delete (window as any).google_access_token;
-  };
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(prev => {
-      const next = !prev;
-      localStorage.setItem('stall_dark_mode', String(next));
-      return next;
-    });
-  };
+  }, []);
 
   const handleCloudSync = useCallback(async () => {
-    if (!navigator.onLine || !isLoggedIn) { setSyncStatus('offline'); return; }
-    if (!googleToken) { setSyncStatus('pending'); return; }
+    if (!navigator.onLine || !isLoggedIn || !googleToken) {
+      setSyncStatus('offline');
+      return;
+    }
+    
     setSyncStatus('syncing');
     try {
-      const success = await syncToGoogleDrive({
-        products, transactions, reports,
-        settings: { lang, telegramConfig, paymentQRCodes }
+      const result = await syncToGoogleDrive({
+        products, 
+        transactions, 
+        reports,
+        settings: { lang, telegramConfig, paymentQRCodes, receiptConfig, changeLogs }
       });
-      if (success) {
+      
+      if (result.success) {
         const now = new Date().toISOString();
         setLastSyncTime(now);
         setSyncStatus('synced');
         localStorage.setItem('stall_last_sync', now);
       } else {
-        setSyncStatus('error');
-        setTimeout(() => setSyncStatus('pending'), 5000);
+        if (result.error === 'UNAUTHORIZED') handleTokenExpiry();
+        else setSyncStatus('error');
       }
     } catch (e) {
       setSyncStatus('error');
-      setTimeout(() => setSyncStatus('pending'), 5000);
     }
-  }, [products, transactions, reports, lang, telegramConfig, paymentQRCodes, isLoggedIn, googleToken]);
-
-  const requestSync = useCallback(() => {
-    if (navigator.onLine) handleCloudSync();
-    else setSyncStatus('pending');
-  }, [handleCloudSync]);
+  }, [products, transactions, reports, changeLogs, lang, telegramConfig, paymentQRCodes, receiptConfig, isLoggedIn, googleToken, handleTokenExpiry]);
 
   useEffect(() => {
-    const handleOnline = () => { setIsOnline(true); handleCloudSync(); };
-    const handleOffline = () => { setIsOnline(false); setSyncStatus('offline'); };
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
-  }, [handleCloudSync]);
+    if (isInitialMount.current || !isHydrated.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    if (!isLoggedIn || !isOnline) return;
 
-  const handleCompleteSale = (tx: Transaction) => {
-    setTransactions(prev => [...prev, tx]);
-    requestSync();
-  };
+    const timer = setTimeout(() => handleCloudSync(), 2000);
+    return () => clearTimeout(timer);
+  }, [products, transactions, reports, changeLogs, lang, telegramConfig, paymentQRCodes, receiptConfig, isLoggedIn, isOnline, handleCloudSync]);
 
+  const handleCompleteSale = (tx: Transaction) => setTransactions(prev => [...prev, tx]);
   const handleUpdateStock = (productId: string, diff: number) => {
-    setProducts(prev => {
-      const p = prev.find(prod => prod.id === productId);
-      if (p) {
-        const updated = { ...p, stock: Math.max(0, p.stock + diff) };
-        handleUpdateProduct(updated);
-      }
-      return prev;
-    });
+    setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: Math.max(0, p.stock + diff) } : p));
   };
 
   const handleBatchUpdateStock = (productIds: string[], amount: number) => {
     const timestamp = new Date().toISOString();
-    const newLogs: ProductChangeLog[] = [];
-
-    setProducts(prev => {
-      return prev.map(p => {
-        if (productIds.includes(p.id)) {
-          const oldStock = p.stock;
-          const newStock = Math.max(0, p.stock + amount);
-          
-          if (oldStock !== newStock) {
-            newLogs.push({
-              id: Math.random().toString(36).substr(2, 9),
-              productId: p.id,
-              productName: p.name,
-              field: 'stock',
-              oldValue: oldStock,
-              newValue: newStock,
-              timestamp
-            });
-          }
-          return { ...p, stock: newStock };
-        }
-        return p;
-      });
-    });
-
-    if (newLogs.length > 0) {
-      setChangeLogs(prevLogs => {
-        const updatedLogs = [...newLogs, ...prevLogs].slice(0, 100);
-        localStorage.setItem('stall_change_logs', JSON.stringify(updatedLogs));
-        return updatedLogs;
-      });
-    }
-    requestSync();
-  };
-
-  const handleUpdateProduct = (updatedProduct: Product) => {
-    setProducts(prev => {
-      const old = prev.find(p => p.id === updatedProduct.id);
-      if (old) {
-        const newLogs: ProductChangeLog[] = [];
-        const timestamp = new Date().toISOString();
-        if (old.price !== updatedProduct.price) {
-          newLogs.push({
-            id: Math.random().toString(36).substr(2, 9),
-            productId: old.id,
-            productName: updatedProduct.name,
-            field: 'price',
-            oldValue: old.price,
-            newValue: updatedProduct.price,
-            timestamp
-          });
-        }
-        if (old.stock !== updatedProduct.stock) {
-          newLogs.push({
-            id: Math.random().toString(36).substr(2, 9),
-            productId: old.id,
-            productName: updatedProduct.name,
-            field: 'stock',
-            oldValue: old.stock,
-            newValue: updatedProduct.stock,
-            timestamp
-          });
-        }
-        if (newLogs.length > 0) {
-          setChangeLogs(prevLogs => {
-            const updatedLogs = [...newLogs, ...prevLogs].slice(0, 100);
-            localStorage.setItem('stall_change_logs', JSON.stringify(updatedLogs));
-            return updatedLogs;
-          });
-        }
+    setProducts(prev => prev.map(p => {
+      if (productIds.includes(p.id)) {
+        const newStock = Math.max(0, p.stock + amount);
+        setChangeLogs(l => [{ id: Math.random().toString(36).substr(2, 9), productId: p.id, productName: p.name, field: 'stock', oldValue: p.stock, newValue: newStock, timestamp }, ...l].slice(0, 100));
+        return { ...p, stock: newStock };
       }
-      return prev.map(p => p.id === updatedProduct.id ? updatedProduct : p);
-    });
-    requestSync();
+      return p;
+    }));
   };
 
-  const handleDeleteProduct = (productId: string) => {
-    setProducts(prev => prev.filter(p => p.id !== productId));
-    requestSync();
-  };
+  const handleUpdateProduct = (updated: Product) => setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
+  const handleDeleteProduct = (id: string) => setProducts(prev => prev.filter(p => p.id !== id));
+  const handleDeleteMultipleProducts = (ids: string[]) => setProducts(prev => prev.filter(p => !ids.includes(p.id)));
+  const handleAddProduct = (p: Product) => setProducts(prev => [...prev, p]);
 
-  const handleAddProduct = (p: Product) => {
-    setProducts(prev => [...prev, p]);
-    requestSync();
-  };
+  if (!isLoggedIn) return <LandingView lang={lang} setLang={setLang} onLogin={handleLogin} />;
 
-  if (!isLoggedIn) {
-    return <LandingView lang={lang} setLang={setLang} onLogin={handleLogin} />;
+  if (isInitialCloudLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-20 h-20 bg-blue-600 rounded-[32px] flex items-center justify-center shadow-2xl shadow-blue-200 animate-bounce mb-8">
+           <i className="fas fa-cloud-download-alt text-white text-3xl"></i>
+        </div>
+        <h2 className="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">Restoring Your Stall...</h2>
+        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">Syncing Registry & Binary Assets</p>
+      </div>
+    );
   }
 
   return (
@@ -281,14 +258,14 @@ const App: React.FC = () => {
         isSyncing={syncStatus === 'syncing'} 
         lastSyncTime={lastSyncTime}
         isDarkMode={isDarkMode}
-        onToggleDarkMode={toggleDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
       >
         <Routes>
-          <Route path="/" element={<OrderingView products={products} lang={lang} googleToken={googleToken} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} onReauth={handleLogin} />} />
-          <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} changeLogs={changeLogs} onBatchUpdateStock={handleBatchUpdateStock} />} />
+          <Route path="/" element={<OrderingView products={products} lang={lang} onCompleteSale={handleCompleteSale} updateStock={handleUpdateStock} customQRCodes={paymentQRCodes} receiptConfig={receiptConfig} />} />
+          <Route path="/inventory" element={<InventoryView products={products} lang={lang} onAddProduct={handleAddProduct} onUpdateProduct={handleUpdateProduct} onDeleteProduct={handleDeleteProduct} onDeleteMultipleProducts={handleDeleteMultipleProducts} changeLogs={changeLogs} onBatchUpdateStock={handleBatchUpdateStock} syncStatus={syncStatus} onManualSync={handleCloudSync} />} />
           <Route path="/analytics" element={<AnalyticsView transactions={transactions} products={products} lang={lang} />} />
           <Route path="/records" element={<RecordsView transactions={transactions} lang={lang} />} />
-          <Route path="/settings" element={<SettingsView lang={lang} googleToken={googleToken} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={async () => true} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} onReauth={handleLogin} />} />
+          <Route path="/settings" element={<SettingsView lang={lang} paymentQRCodes={paymentQRCodes} onUpdateQRCodes={setPaymentQRCodes} telegramConfig={telegramConfig} onUpdateTelegramConfig={setTelegramConfig} onLogout={handleLogout} onTestTelegram={async () => true} onForceSync={handleCloudSync} isSyncing={syncStatus === 'syncing'} receiptConfig={receiptConfig} onUpdateReceiptConfig={setReceiptConfig} onForceDownload={handleCloudDownload} lastSyncTime={lastSyncTime} />} />
         </Routes>
       </Layout>
     </HashRouter>

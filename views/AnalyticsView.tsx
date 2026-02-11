@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { Transaction, Language, Product } from '../types';
 import { TRANSLATIONS } from '../constants';
@@ -16,7 +17,6 @@ type DateRange = 'today' | 'all';
 const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, products }) => {
   const t = TRANSLATIONS[lang] as any;
   const mapRef = useRef<any>(null);
-  const timerRef = useRef<number | null>(null);
   const [range, setRange] = useState<DateRange>('today');
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
 
@@ -33,7 +33,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
   const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.total, 0);
   const totalProfit = filteredTransactions.reduce((acc, curr) => acc + curr.profit, 0);
 
-  // New Customers calculation (unique emails)
   const newCustomersCount = useMemo(() => {
     const emails = filteredTransactions
       .map(tx => tx.customerEmail)
@@ -41,7 +40,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     return new Set(emails).size;
   }, [filteredTransactions]);
 
-  // Group transactions by location for the proportional symbol map
   const locationStats = useMemo(() => {
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
     filteredTransactions.forEach(tx => {
@@ -92,7 +90,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       .slice(0, 5);
   }, [filteredTransactions]);
 
-  // Initial user location fetch
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -108,8 +105,8 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     const container = document.getElementById('analytics-map');
     if (!container) return;
 
-    // Helper to check if map is still valid and in DOM
-    const isMapValid = () => {
+    // Helper to verify map is fully operational
+    const isMapOperational = () => {
       return mapRef.current && container.isConnected;
     };
 
@@ -122,34 +119,33 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       }
 
       try {
-        mapRef.current = L.map('analytics-map', {
+        const mapInstance = L.map('analytics-map', {
           zoomControl: false,
           attributionControl: false,
-          // Track container resize to avoid _leaflet_pos issues
           trackResize: true
         }).setView(initialCenter, locationStats.length > 0 ? 15 : 13);
         
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { 
           attribution: '&copy; OpenStreetMap' 
-        }).addTo(mapRef.current);
+        }).addTo(mapInstance);
         
-        L.control.zoom({ position: 'bottomright' }).addTo(mapRef.current);
-
-        // Schedule invalidateSize after a short delay to ensure DOM is ready
-        timerRef.current = window.setTimeout(() => {
-          if (isMapValid()) {
-            mapRef.current.invalidateSize();
-          }
-        }, 100);
+        L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
+        
+        mapRef.current = mapInstance;
       } catch (err) {
         console.error("Leaflet initialization failed", err);
       }
     }
 
-    if (isMapValid()) {
+    if (isMapOperational()) {
+      const map = mapRef.current;
+      
+      // CRITICAL: Force map to recognize container size before any calculations
+      map.invalidateSize(false);
+
       // Clear existing markers
-      mapRef.current.eachLayer((layer: any) => { 
-        if (layer instanceof L.CircleMarker) mapRef.current.removeLayer(layer); 
+      map.eachLayer((layer: any) => { 
+        if (layer instanceof L.CircleMarker) map.removeLayer(layer); 
       });
 
       locationStats.forEach(stat => {
@@ -162,7 +158,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           weight: 2,
           opacity: 1,
           fillOpacity: 0.7
-        }).addTo(mapRef.current);
+        }).addTo(map);
 
         bubble.bindPopup(`
           <div class="p-2 min-w-[140px]">
@@ -183,33 +179,37 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         });
       });
 
-      // Fit bounds safely
-      if (locationStats.length > 0) {
-        const bounds = locationStats.map(s => [s.lat, s.lng] as [number, number]);
-        try {
-          if (locationStats.length === 1) {
-            mapRef.current.setView(bounds[0], 16, { animate: true });
-          } else {
-            mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+      // Fit bounds safely with a slight delay to ensure internal DOM state is ready
+      const updateView = () => {
+        if (!isMapOperational()) return;
+        if (locationStats.length > 0) {
+          const bounds = locationStats.map(s => [s.lat, s.lng] as [number, number]);
+          try {
+            if (locationStats.length === 1) {
+              map.setView(bounds[0], 16, { animate: true });
+            } else {
+              map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+            }
+          } catch (e) {
+            console.warn("View update failed", e);
           }
-        } catch (e) {
-          console.warn("fitBounds failed, usually due to container size", e);
+        } else if (userLoc) {
+          map.panTo([userLoc.lat, userLoc.lng]);
         }
-      } else if (userLoc) {
-        mapRef.current.panTo([userLoc.lat, userLoc.lng]);
-      }
+      };
+
+      // Use requestAnimationFrame to ensure we are in a clean layout state
+      requestAnimationFrame(updateView);
     }
 
     return () => {
-      if (timerRef.current) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
-      }
       if (mapRef.current) {
         try {
+          // Thorough cleanup
+          mapRef.current.off();
           mapRef.current.remove();
         } catch (e) {
-          console.warn("Map removal error", e);
+          console.warn("Map cleanup error", e);
         }
         mapRef.current = null;
       }

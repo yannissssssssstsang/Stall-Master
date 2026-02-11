@@ -1,8 +1,9 @@
 
-import React, { useRef, useState } from 'react';
-import { Language, PaymentQRCodes, TelegramConfig } from '../types';
+import React, { useRef, useState, useEffect } from 'react';
+import { Language, PaymentQRCodes, TelegramConfig, ReceiptConfig } from '../types';
 import { TRANSLATIONS } from '../constants';
-import { verifyGoogleConnection, ConnectionStatus } from '../services/googleDriveService';
+import { verifyGoogleConnection, ConnectionStatus, listDriveFiles, getDriveFileAsBase64 } from '../services/googleDriveService';
+import { extractBusinessCardInfo } from '../services/geminiService';
 
 interface SettingsViewProps {
   lang: Language;
@@ -14,6 +15,10 @@ interface SettingsViewProps {
   onTestTelegram: () => Promise<boolean | undefined>;
   onForceSync: () => Promise<void>;
   isSyncing?: boolean;
+  receiptConfig: ReceiptConfig;
+  onUpdateReceiptConfig: (config: ReceiptConfig) => void;
+  onForceDownload: () => Promise<void>;
+  lastSyncTime?: string | null;
 }
 
 interface HKMethod {
@@ -34,6 +39,27 @@ const HK_METHODS: HKMethod[] = [
   { id: 'BOCPAY', name: 'BOC Pay', icon: 'fa-building-columns', color: 'text-red-700', bgColor: 'bg-red-50', brandColor: '#b31c1c' },
 ];
 
+const optimizeImage = (base64: string, maxWidth: number = 500): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+      if (width > maxWidth) {
+        height = (maxWidth / width) * height;
+        width = maxWidth;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.6));
+    };
+  });
+};
+
 const SettingsView: React.FC<SettingsViewProps> = ({ 
   lang, 
   paymentQRCodes, 
@@ -43,46 +69,89 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   onLogout,
   onTestTelegram,
   onForceSync,
-  isSyncing
+  isSyncing,
+  receiptConfig,
+  onUpdateReceiptConfig,
+  onForceDownload,
+  lastSyncTime
 }) => {
   const t = TRANSLATIONS[lang];
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modalFileInputRef = useRef<HTMLInputElement>(null);
-  const [activeUploadMethod, setActiveUploadMethod] = useState<string | null>(null);
+  const brandingInputRef = useRef<HTMLInputElement>(null);
   
-  // Telegram States
+  const [activeUploadMethod, setActiveUploadMethod] = useState<string | null>(null);
+  const [brandingTarget, setBrandingTarget] = useState<'logo' | 'businessCard' | null>(null);
+  const [isSavedLocally, setIsSavedLocally] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  
   const [testStatus, setTestStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  // Cloud Diagnostic States
   const [diagStatus, setDiagStatus] = useState<ConnectionStatus | null>(null);
   const [isCheckingDiag, setIsCheckingDiag] = useState(false);
-
-  // New Payment Method Modal state
   const [isAddingNewMethod, setIsAddingNewMethod] = useState(false);
   const [isCustomMode, setIsCustomMode] = useState(false);
   const [newMethodName, setNewMethodName] = useState('');
   const [tempQRData, setTempQRData] = useState<string | null>(null);
+  const [showDrivePicker, setShowDrivePicker] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
+    reader.onloadend = async () => {
+      const rawResult = reader.result as string;
+      const optimized = await optimizeImage(rawResult);
+      
       if (activeUploadMethod) {
-        onUpdateQRCodes({ ...paymentQRCodes, [activeUploadMethod]: result });
+        onUpdateQRCodes({ ...paymentQRCodes, [activeUploadMethod]: optimized });
         setActiveUploadMethod(null);
+      } else if (brandingTarget) {
+        onUpdateReceiptConfig({ ...receiptConfig, [brandingTarget]: optimized });
+        setBrandingTarget(null);
       } else {
-        setTempQRData(result);
+        setTempQRData(optimized);
       }
     };
     reader.readAsDataURL(file);
   };
 
+  const handleBrandingDriveImport = async (fileId: string) => {
+    setIsLoadingDrive(true);
+    const base64 = await getDriveFileAsBase64(fileId);
+    if (base64 && brandingTarget) {
+      const optimized = await optimizeImage(base64);
+      onUpdateReceiptConfig({ ...receiptConfig, [brandingTarget]: optimized });
+    }
+    setIsLoadingDrive(false);
+    setShowDrivePicker(false);
+    setBrandingTarget(null);
+  };
+
+  const openDrivePicker = (target: 'logo' | 'businessCard') => {
+    setBrandingTarget(target);
+    setShowDrivePicker(true);
+    loadDriveFiles();
+  };
+
+  const loadDriveFiles = async () => {
+    setIsLoadingDrive(true);
+    const result = await listDriveFiles();
+    setDriveFiles(result.files || []);
+    setIsLoadingDrive(false);
+  };
+
   const triggerUpload = (method: string) => {
     setActiveUploadMethod(method);
     fileInputRef.current?.click();
+  };
+
+  const triggerBrandingUpload = (target: 'logo' | 'businessCard') => {
+    setBrandingTarget(target);
+    brandingInputRef.current?.click();
   };
 
   const removePaymentMethod = (method: string) => {
@@ -119,6 +188,18 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const handleSaveAll = async () => {
+    setIsSavedLocally(true);
+    await onForceSync();
+    setTimeout(() => setIsSavedLocally(false), 2000);
+  };
+
+  const handleManualDownload = async () => {
+    setIsDownloading(true);
+    await onForceDownload();
+    setIsDownloading(false);
+  };
+
   const runCloudDiagnostic = async () => {
     setIsCheckingDiag(true);
     const result = await verifyGoogleConnection();
@@ -126,17 +207,48 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     setIsCheckingDiag(false);
   };
 
+  const handleExtractInfo = async () => {
+    if (!receiptConfig.businessCard) return;
+    setIsExtracting(true);
+    const extracted = await extractBusinessCardInfo(receiptConfig.businessCard);
+    if (extracted) {
+      onUpdateReceiptConfig({
+        ...receiptConfig,
+        companyName: extracted.companyName || receiptConfig.companyName,
+        address: extracted.address || receiptConfig.address,
+        phone: extracted.phone || receiptConfig.phone,
+        email: extracted.email || receiptConfig.email,
+      });
+    }
+    setIsExtracting(false);
+  };
+
   return (
     <div className="space-y-6 pb-20">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-black text-slate-800 tracking-tight">{t.settings}</h2>
+        <button 
+          onClick={handleSaveAll}
+          disabled={isSyncing}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg transition-all active:scale-95 ${isSavedLocally ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+        >
+          {isSyncing ? <i className="fas fa-sync fa-spin"></i> : <i className={`fas ${isSavedLocally ? 'fa-check' : 'fa-save'}`}></i>}
+          {isSyncing ? 'Syncing...' : (isSavedLocally ? 'Saved & Synced' : 'Save & Sync All')}
+        </button>
       </div>
 
-      {/* Cloud Diagnostic & Sync Section */}
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 space-y-6">
         <div className="flex justify-between items-center">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Connectivity & Cloud</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Cloud Backup & Recovery</h3>
           <div className="flex gap-2">
+            <button 
+              onClick={handleManualDownload}
+              disabled={isDownloading}
+              className="px-4 py-1.5 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black uppercase tracking-widest border border-blue-100 hover:bg-blue-100 transition-all flex items-center gap-2"
+            >
+              {isDownloading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-download"></i>}
+              Recover from Cloud
+            </button>
             <button 
               onClick={runCloudDiagnostic}
               disabled={isCheckingDiag}
@@ -144,14 +256,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
             >
               {isCheckingDiag ? <i className="fas fa-spinner fa-spin mr-2"></i> : null}
               Diagnostic
-            </button>
-            <button 
-              onClick={onForceSync}
-              disabled={isSyncing}
-              className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${isSyncing ? 'bg-blue-100 text-blue-600' : 'bg-blue-600 text-white shadow-lg shadow-blue-100'}`}
-            >
-              {isSyncing ? <i className="fas fa-sync fa-spin mr-2"></i> : null}
-              {isSyncing ? 'Syncing...' : 'Sync Now'}
             </button>
           </div>
         </div>
@@ -169,222 +273,170 @@ const SettingsView: React.FC<SettingsViewProps> = ({
         )}
 
         <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-          <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-sm">
-             <i className="fab fa-google text-blue-500 text-xl"></i>
+          <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm">
+             <i className="fab fa-google text-blue-500 text-lg"></i>
           </div>
-          <div className="flex-1">
-            <p className="font-bold text-slate-800">Google Drive Account</p>
-            <p className="text-xs text-slate-500">Inventory & Records saved in 'StallMaster_Data'</p>
+          <div className="flex-1 min-w-0">
+             <p className="text-xs font-black text-slate-800 uppercase tracking-tight">Cloud Connection Status</p>
+             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
+               {lastSyncTime ? `Last Synced: ${new Date(lastSyncTime).toLocaleString()}` : 'No Sync History'}
+             </p>
           </div>
-          <div className={`w-3 h-3 rounded-full ${diagStatus?.ok ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-300'}`}></div>
+          <div className={`w-2.5 h-2.5 rounded-full ${diagStatus?.ok ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`}></div>
         </div>
       </div>
 
-      {/* Telegram Configuration */}
-      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">{t.telegramSettings}</h3>
-          <button 
-            onClick={runTelegramTest}
-            disabled={testStatus === 'loading'}
-            className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${
-              testStatus === 'success' ? 'bg-green-100 text-green-600' : 
-              testStatus === 'error' ? 'bg-red-100 text-red-600' :
-              'bg-blue-50 text-blue-600 hover:bg-blue-100'
-            }`}
-          >
-            {testStatus === 'loading' ? <i className="fas fa-spinner fa-spin mr-2"></i> : null}
-            {testStatus === 'success' ? 'Success!' : testStatus === 'error' ? 'Failed' : 'Test Connection'}
-          </button>
-        </div>
-        
-        <div className="space-y-4">
-          {errorMessage && (
-            <div className="p-3 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 animate-scale-in">
-              <i className="fas fa-exclamation-circle mr-2"></i>
-              {errorMessage}
-            </div>
-          )}
-          <div>
-            <div className="flex justify-between items-center mb-2 ml-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">{t.botToken}</label>
-              <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-[9px] font-bold text-blue-500 hover:underline">Get Token</a>
-            </div>
-            <input type="password" value={telegramConfig.botToken} onChange={e => onUpdateTelegramConfig({ ...telegramConfig, botToken: e.target.value })} placeholder="123456789:ABCDE..." className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-blue-500" />
-          </div>
-          <div>
-            <div className="flex justify-between items-center mb-2 ml-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">{t.chatId}</label>
-              <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer" className="text-[9px] font-bold text-blue-500 hover:underline">Find ID</a>
-            </div>
-            <input type="text" value={telegramConfig.chatId} onChange={e => onUpdateTelegramConfig({ ...telegramConfig, chatId: e.target.value })} placeholder="Numeric ID (e.g. 12345678)" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:border-blue-500" />
+      {/* Email Receipt Section */}
+      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 space-y-6">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Email Receipt Customization</h3>
+          <div className="flex items-center gap-2">
+            <i className="fas fa-magic text-blue-500 text-[10px]"></i>
+            <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">AI Extraction Ready</span>
           </div>
         </div>
-      </div>
 
-      {/* Payment Configuration */}
-      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Digital Payments (QR)</h3>
-          <button 
-            onClick={() => { setIsAddingNewMethod(true); setIsCustomMode(false); setTempQRData(null); }}
-            className="px-4 py-1.5 rounded-full bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all flex items-center gap-2"
-          >
-            <i className="fas fa-plus"></i>
-            Add New
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4">
-          {Object.keys(paymentQRCodes).map((m) => {
-            const preset = HK_METHODS.find(h => h.id === m);
-            return (
-              <div key={m} className="flex flex-col p-4 border border-slate-100 rounded-2xl bg-slate-50 group">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden border border-slate-100 p-1">
-                      {paymentQRCodes[m] ? (
-                        <img src={paymentQRCodes[m]} className="w-full h-full object-contain" />
-                      ) : (
-                        <i className={`fas ${preset?.icon || 'fa-wallet'} text-lg ${preset?.color || 'text-slate-300'}`}></i>
-                      )}
-                    </div>
-                    <div>
-                      <p className="font-black text-slate-800 text-sm uppercase tracking-tight">{m}</p>
-                      <p className={`text-[10px] font-bold uppercase ${paymentQRCodes[m] ? 'text-emerald-500' : 'text-red-400'}`}>
-                        {paymentQRCodes[m] ? 'QR Ready' : 'Awaiting QR Code'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => triggerUpload(m)} 
-                      className="bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-[10px] font-black shadow-sm uppercase hover:bg-slate-50 transition-colors"
-                    >
-                      Update QR
-                    </button>
-                    <button 
-                      onClick={() => removePaymentMethod(m)} 
-                      className="w-10 h-10 bg-white text-red-400 border border-slate-200 rounded-xl flex items-center justify-center shadow-sm hover:text-red-500 transition-colors"
-                    >
-                      <i className="fas fa-trash-can text-xs"></i>
-                    </button>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="space-y-4">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Company Assets</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <p className="text-[9px] font-bold text-slate-400 uppercase ml-1">Company Logo</p>
+                <div 
+                  className="w-full aspect-square rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50 flex items-center justify-center relative overflow-hidden group cursor-pointer"
+                  onClick={() => triggerBrandingUpload('logo')}
+                >
+                  {receiptConfig.logo ? (
+                    <img src={receiptConfig.logo} className="w-full h-full object-contain p-2" alt="Logo" />
+                  ) : (
+                    <i className="fas fa-image text-slate-200 text-2xl"></i>
+                  )}
+                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity">
+                    <button className="text-[8px] text-white font-black uppercase mb-2" onClick={(e) => { e.stopPropagation(); openDrivePicker('logo'); }}>Google Drive</button>
+                    <button className="text-[8px] text-white font-black uppercase">Local Storage</button>
                   </div>
                 </div>
               </div>
-            );
-          })}
-          
-          {Object.keys(paymentQRCodes).length === 0 && (
-            <div className="text-center py-10 border-2 border-dashed border-slate-100 rounded-2xl">
-              <i className="fas fa-qrcode text-slate-100 text-3xl mb-2"></i>
-              <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">No Digital Payments Configured</p>
+
+              <div className="space-y-2">
+                <p className="text-[9px] font-bold text-slate-400 uppercase ml-1">Business Card</p>
+                <div 
+                  className="w-full aspect-square rounded-2xl border-2 border-dashed border-slate-100 bg-slate-50 flex items-center justify-center relative overflow-hidden group cursor-pointer"
+                  onClick={() => triggerBrandingUpload('businessCard')}
+                >
+                  {receiptConfig.businessCard ? (
+                    <img src={receiptConfig.businessCard} className="w-full h-full object-cover" alt="Card" />
+                  ) : (
+                    <i className="fas fa-address-card text-slate-200 text-2xl"></i>
+                  )}
+                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity">
+                    <button className="text-[8px] text-white font-black uppercase mb-2" onClick={(e) => { e.stopPropagation(); openDrivePicker('businessCard'); }}>Google Drive</button>
+                    <button className="text-[8px] text-white font-black uppercase">Local Storage</button>
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
+
+            <button 
+              onClick={handleExtractInfo}
+              disabled={!receiptConfig.businessCard || isExtracting}
+              className="w-full bg-blue-50 text-blue-600 p-4 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 border border-blue-100 transition-all hover:bg-blue-100 disabled:opacity-50"
+            >
+              {isExtracting ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-wand-magic-sparkles"></i>}
+              {isExtracting ? 'Analyzing Card...' : 'Extract Info from Card'}
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Receipt Footer Information</p>
+            <div className="space-y-3">
+              <input type="text" value={receiptConfig.companyName} onChange={e => onUpdateReceiptConfig({...receiptConfig, companyName: e.target.value})} placeholder="Company Name" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-blue-500" />
+              <input type="text" value={receiptConfig.address} onChange={e => onUpdateReceiptConfig({...receiptConfig, address: e.target.value})} placeholder="Business Address" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-blue-500" />
+              <div className="grid grid-cols-2 gap-3">
+                <input type="text" value={receiptConfig.phone} onChange={e => onUpdateReceiptConfig({...receiptConfig, phone: e.target.value})} placeholder="Phone" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-blue-500" />
+                <input type="email" value={receiptConfig.email} onChange={e => onUpdateReceiptConfig({...receiptConfig, email: e.target.value})} placeholder="Email" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:border-blue-500" />
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-[32px] shadow-sm border border-slate-100">
-        <button onClick={onLogout} className="w-full text-left p-5 text-sm font-black text-red-500 hover:bg-red-50 rounded-2xl transition-colors flex justify-between items-center group">
-          <span>Sign Out of Google</span>
-          <i className="fas fa-arrow-right-from-bracket group-hover:translate-x-1 transition-transform"></i>
-        </button>
+      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100">
+        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Digital Payments (QR)</h3>
+        <div className="grid grid-cols-1 gap-4">
+          {Object.keys(paymentQRCodes).map((m) => (
+            <div key={m} className="flex items-center justify-between p-4 border border-slate-100 rounded-2xl bg-slate-50">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center shadow-sm overflow-hidden border border-slate-100">
+                  {paymentQRCodes[m] ? <img src={paymentQRCodes[m]} className="w-full h-full object-contain" /> : <i className="fas fa-qrcode text-slate-200"></i>}
+                </div>
+                <p className="font-black text-slate-800 text-sm uppercase tracking-tight">{m}</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => triggerUpload(m)} className="bg-white px-4 py-2 rounded-xl text-[10px] font-black shadow-sm uppercase">Update</button>
+                <button onClick={() => removePaymentMethod(m)} className="w-10 h-10 bg-white text-red-400 border border-slate-100 rounded-xl flex items-center justify-center"><i className="fas fa-trash-can"></i></button>
+              </div>
+            </div>
+          ))}
+          <button onClick={() => { setIsAddingNewMethod(true); setIsCustomMode(false); }} className="w-full p-4 border-2 border-dashed border-slate-200 rounded-2xl text-[10px] font-black uppercase text-slate-400 hover:bg-slate-50">Add Payment Method</button>
+        </div>
       </div>
 
-      {/* Redesigned Dropdown-Style Modal for Adding Payment Methods */}
-      {isAddingNewMethod && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-[48px] p-6 md:p-8 shadow-2xl animate-scale-in max-h-[90vh] flex flex-col">
-            <div className="flex justify-between items-center mb-6 shrink-0">
-              <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">
-                {isCustomMode ? 'Custom Payment' : 'Choose Provider'}
-              </h3>
-              <button onClick={() => { setIsAddingNewMethod(false); setIsCustomMode(false); setTempQRData(null); }} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400 shadow-sm"><i className="fas fa-times"></i></button>
-            </div>
+      <button onClick={onLogout} className="w-full p-5 bg-white border border-slate-100 rounded-[32px] text-red-500 font-black uppercase text-xs tracking-widest">Sign Out</button>
 
-            {!isCustomMode ? (
-              <div className="space-y-2 overflow-y-auto flex-1 pr-2 custom-scrollbar">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 ml-1">Available in Hong Kong</p>
-                <div className="space-y-2">
-                  {HK_METHODS.map(method => (
-                    <button 
-                      key={method.id}
-                      onClick={() => addNewMethod(method.id)}
-                      className={`w-full p-4 rounded-3xl border border-slate-100 flex items-center gap-4 transition-all hover:border-blue-200 hover:bg-slate-50 group active:scale-[0.98] ${method.bgColor.replace('bg-', 'hover:bg-')}`}
-                    >
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm transition-transform group-hover:scale-110 bg-white`}>
-                        <i className={`fas ${method.icon} text-xl ${method.color}`}></i>
-                      </div>
-                      <div className="text-left">
-                        <p className="text-sm font-black text-slate-800 tracking-tight">{method.name}</p>
-                      </div>
-                      <i className="fas fa-chevron-right ml-auto text-slate-200 group-hover:translate-x-1 transition-transform"></i>
+      {/* Modals */}
+      {showDrivePicker && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-[48px] p-8 shadow-2xl max-h-[80vh] flex flex-col">
+            <h3 className="text-xl font-black mb-6 uppercase">Select from Drive</h3>
+            <div className="flex-1 overflow-y-auto">
+              {isLoadingDrive ? <i className="fas fa-spinner fa-spin"></i> : (
+                <div className="grid grid-cols-2 gap-4">
+                  {driveFiles.map(file => (
+                    <button key={file.id} onClick={() => handleBrandingDriveImport(file.id)} className="p-3 border rounded-2xl hover:bg-slate-50">
+                      <img src={file.thumbnailLink?.replace('=s220', '=s400')} className="w-full aspect-square object-cover rounded-xl mb-2" />
+                      <p className="text-[10px] truncate">{file.name}</p>
                     </button>
                   ))}
-                  <button 
-                    onClick={() => setIsCustomMode(true)}
-                    className="w-full p-4 rounded-3xl border border-dashed border-slate-200 flex items-center gap-4 transition-all hover:bg-slate-50 group active:scale-[0.98]"
-                  >
-                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm text-slate-400">
-                      <i className="fas fa-plus"></i>
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-black text-slate-800 tracking-tight">Other / International</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Custom Payment Provider</p>
-                    </div>
-                  </button>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-6 flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Method Name</label>
-                  <input 
-                    autoFocus
-                    type="text" 
-                    value={newMethodName}
-                    onChange={e => setNewMethodName(e.target.value)}
-                    placeholder="e.g. STRIPE, VENMO, LINEPAY"
-                    className="w-full p-5 bg-slate-50 border border-slate-100 rounded-[24px] text-sm font-black outline-none focus:border-blue-500 uppercase shadow-inner"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Upload QR Code</label>
-                  <div 
-                    onClick={() => modalFileInputRef.current?.click()}
-                    className={`w-full aspect-square md:aspect-video rounded-[32px] border-2 border-dashed flex flex-col items-center justify-center transition-all cursor-pointer overflow-hidden ${tempQRData ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
-                  >
-                    {tempQRData ? (
-                      <img src={tempQRData} className="w-full h-full object-contain p-4" alt="QR Preview" />
-                    ) : (
-                      <>
-                        <i className="fas fa-qrcode text-3xl text-slate-300 mb-2"></i>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tap to Select QR Image</p>
-                      </>
-                    )}
-                  </div>
-                  <input type="file" ref={modalFileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-4">
-                  <button onClick={() => setIsCustomMode(false)} className="p-5 bg-slate-100 text-slate-500 rounded-[28px] text-[11px] font-black uppercase tracking-widest transition-colors hover:bg-slate-200">Back</button>
-                  <button 
-                    onClick={() => addNewMethod(newMethodName, tempQRData)} 
-                    disabled={!newMethodName}
-                    className="p-5 bg-blue-600 text-white rounded-[28px] text-[11px] font-black uppercase tracking-widest shadow-xl shadow-blue-100 active:scale-95 transition-all disabled:opacity-50"
-                  >
-                    Add Method
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
+            </div>
+            <button onClick={() => setShowDrivePicker(false)} className="mt-4 p-4 font-black uppercase text-xs">Close</button>
           </div>
         </div>
       )}
 
-      {/* Main Setting Page File Input */}
+      {isAddingNewMethod && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl">
+            <h3 className="text-xl font-black mb-6 uppercase">New Payment Method</h3>
+            {!isCustomMode ? (
+              <div className="space-y-2">
+                {HK_METHODS.map(m => (
+                  <button key={m.id} onClick={() => addNewMethod(m.id)} className="w-full p-4 border rounded-2xl text-left flex items-center gap-4 hover:bg-slate-50">
+                    <i className={`fas ${m.icon} ${m.color}`}></i>
+                    <span className="font-bold">{m.name}</span>
+                  </button>
+                ))}
+                <button onClick={() => setIsCustomMode(true)} className="w-full p-4 border border-dashed rounded-2xl">Other / Custom</button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <input type="text" value={newMethodName} onChange={e => setNewMethodName(e.target.value)} placeholder="Method Name" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold" />
+                <div onClick={() => modalFileInputRef.current?.click()} className="aspect-square border-2 border-dashed rounded-2xl flex items-center justify-center overflow-hidden">
+                  {tempQRData ? <img src={tempQRData} className="w-full h-full object-contain" /> : 'Tap to Upload QR'}
+                </div>
+                <button onClick={() => addNewMethod(newMethodName, tempQRData)} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase">Add Method</button>
+              </div>
+            )}
+            <button onClick={() => setIsAddingNewMethod(false)} className="w-full mt-4 p-2 text-slate-400 font-bold uppercase text-[10px]">Cancel</button>
+          </div>
+        </div>
+      )}
+
       <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+      <input type="file" ref={brandingInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
+      <input type="file" ref={modalFileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
     </div>
   );
 };

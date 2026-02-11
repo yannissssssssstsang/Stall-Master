@@ -9,15 +9,6 @@ interface LandingViewProps {
 }
 
 const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => {
-  const [copied, setCopied] = useState(false);
-  const currentOrigin = window.location.origin;
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(currentOrigin);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden text-slate-900">
       {/* Background Accents */}
@@ -31,7 +22,7 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
           </div>
           <div className="space-y-2">
             <h1 className="text-5xl font-black tracking-tighter text-slate-900">
-              {lang === Language.ZH ? '揸流攤' : 'StallMate'}
+              StallMate
             </h1>
             <p className="text-sm font-bold text-blue-600 uppercase tracking-[0.4em]">
               {lang === Language.ZH ? '智能零售生態系統' : 'Intelligent Retail Ecosystem'}
@@ -54,13 +45,6 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
             </div>
             <span>{lang === Language.ZH ? '使用 Google 帳戶登入' : 'Sign in with Google'}</span>
           </button>
-
-          <button 
-            onClick={() => setLang(lang === Language.EN ? Language.ZH : Language.EN)}
-            className="w-full p-6 rounded-[28px] font-black uppercase tracking-[0.2em] text-xs text-slate-400 hover:text-blue-600 hover:bg-blue-50/50 transition-all border border-transparent hover:border-blue-100"
-          >
-            {lang === Language.EN ? '切換為 揸流攤' : 'Switch to StallMate'}
-          </button>
         </div>
 
         {/* Privacy Note for End Users */}
@@ -74,23 +58,6 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
               ? '您的數據（庫存、銷售記錄）將私密地儲存在您自己的 Google Drive 中。我們不會訪問您的個人檔案，也不會儲存您的客戶資料。' 
               : 'Your data (inventory, sales) is stored privately in your own Google Drive. We never access your personal files or store your customer data on our servers.'}
           </p>
-        </div>
-
-        {/* Developer Helper Section (Hide this before production) */}
-        <div className="mt-8 p-4 bg-slate-50 rounded-2xl border border-slate-100 flex flex-col items-center gap-2">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-            {lang === Language.ZH ? 'Google 控制台授權來源' : 'Authorized JavaScript Origin'}
-          </p>
-          <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm overflow-hidden max-w-full">
-            <code className="text-[10px] font-mono text-blue-600 truncate">{currentOrigin}</code>
-            <button 
-              onClick={handleCopy}
-              className="text-slate-400 hover:text-blue-600 transition-colors"
-              title="Copy to clipboard"
-            >
-              <i className={`fas ${copied ? 'fa-check text-emerald-500' : 'fa-copy'}`}></i>
-            </button>
-          </div>
         </div>
 
         <button 
