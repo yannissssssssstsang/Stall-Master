@@ -44,6 +44,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
     filteredTransactions.forEach(tx => {
       if (tx.location) {
+        // Rounding to 5 decimal places for stable grouping (~1m precision)
         const key = `${tx.location.lat.toFixed(5)},${tx.location.lng.toFixed(5)}`;
         if (!stats[key]) {
           stats[key] = { 
@@ -105,13 +106,12 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     const container = document.getElementById('analytics-map');
     if (!container) return;
 
-    // Helper to verify map is fully operational
     const isMapOperational = () => {
       return mapRef.current && container.isConnected;
     };
 
     if (!mapRef.current) {
-      let initialCenter: [number, number] = [22.3193, 114.1694];
+      let initialCenter: [number, number] = [22.3193, 114.1694]; // Default to HK
       if (locationStats.length > 0) {
         initialCenter = [locationStats[0].lat, locationStats[0].lng];
       } else if (userLoc) {
@@ -140,8 +140,10 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     if (isMapOperational()) {
       const map = mapRef.current;
       
-      // CRITICAL: Force map to recognize container size before any calculations
-      map.invalidateSize(false);
+      // Delay invalidateSize to account for dashboard card transitions (0.3s)
+      const resizeTimer = setTimeout(() => {
+        if (isMapOperational()) map.invalidateSize();
+      }, 400);
 
       // Clear existing markers
       map.eachLayer((layer: any) => { 
@@ -179,7 +181,6 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         });
       });
 
-      // Fit bounds safely with a slight delay to ensure internal DOM state is ready
       const updateView = () => {
         if (!isMapOperational()) return;
         if (locationStats.length > 0) {
@@ -198,14 +199,13 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         }
       };
 
-      // Use requestAnimationFrame to ensure we are in a clean layout state
       requestAnimationFrame(updateView);
+      return () => clearTimeout(resizeTimer);
     }
 
     return () => {
       if (mapRef.current) {
         try {
-          // Thorough cleanup
           mapRef.current.off();
           mapRef.current.remove();
         } catch (e) {

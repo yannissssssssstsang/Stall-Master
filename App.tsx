@@ -13,7 +13,7 @@ import { syncToGoogleDrive, downloadFromGoogleDrive } from './services/googleDri
 
 declare const google: any;
 
-const GOOGLE_CLIENT_ID = 'YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '950489680613-dnvqv44q1aml8tdakijnp0r0hr5gqqt0.apps.googleusercontent.com';
 
 const INITIAL_PRODUCTS: Product[] = [
   { id: '1', name: 'Artisan Coffee', price: 45, cost: 15, stock: 50, threshold: 5, category: 'Beverage', image: 'https://picsum.photos/seed/coffee/200' },
@@ -40,6 +40,7 @@ const App: React.FC = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isDarkMode, setIsDarkMode] = useState(localStorage.getItem('stall_dark_mode') === 'true');
   const [isInitialCloudLoading, setIsInitialCloudLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -126,13 +127,22 @@ const App: React.FC = () => {
             if (tokenResponse && tokenResponse.access_token) {
               setGoogleToken(tokenResponse.access_token);
               setIsLoggedIn(true);
+              setLoginError(null);
               localStorage.setItem('stall_logged_in', 'true');
               handleCloudDownload();
+            } else if (tokenResponse.error) {
+              setLoginError(tokenResponse.error_description || tokenResponse.error);
             }
+          },
+          error_callback: (err: any) => {
+            setLoginError(err.message || "Initialization error");
           }
         });
         setTokenClient(client);
-      } catch (err) { console.error("GSI Init Error:", err); }
+      } catch (err) { 
+        console.error("GSI Init Error:", err); 
+        setLoginError("Failed to initialize Google Login.");
+      }
     }
   };
 
@@ -149,11 +159,14 @@ const App: React.FC = () => {
   }, [isLoggedIn, isOnline, handleCloudDownload]);
 
   const handleLogin = () => {
-    if (tokenClient) tokenClient.requestAccessToken();
-    else { setIsLoggedIn(true); localStorage.setItem('stall_logged_in', 'true'); }
+    setLoginError(null);
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: 'consent' });
+    } else {
+      setLoginError("Login library not ready. Please check your internet connection.");
+    }
   };
 
-  // Safe reset for token expiry - preserves local state
   const handleTokenExpiry = useCallback(() => {
     setGoogleToken(null);
     setIsLoggedIn(false);
@@ -171,6 +184,19 @@ const App: React.FC = () => {
     setReports([]);
     isHydrated.current = false;
     if ((window as any).google_access_token) delete (window as any).google_access_token;
+  }, []);
+
+  const addLog = useCallback((productId: string, productName: string, field: ProductChangeLog['field'], oldValue: string | number, newValue: string | number) => {
+    const log: ProductChangeLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      productId,
+      productName,
+      field,
+      oldValue,
+      newValue,
+      timestamp: new Date().toISOString()
+    };
+    setChangeLogs(prev => [log, ...prev].slice(0, 200));
   }, []);
 
   const handleCloudSync = useCallback(async () => {
@@ -215,25 +241,55 @@ const App: React.FC = () => {
 
   const handleCompleteSale = (tx: Transaction) => setTransactions(prev => [...prev, tx]);
   const handleUpdateStock = (productId: string, diff: number) => {
-    setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: Math.max(0, p.stock + diff) } : p));
-  };
-
-  const handleBatchUpdateStock = (productIds: string[], amount: number) => {
-    const timestamp = new Date().toISOString();
     setProducts(prev => prev.map(p => {
-      if (productIds.includes(p.id)) {
-        const newStock = Math.max(0, p.stock + amount);
-        setChangeLogs(l => [{ id: Math.random().toString(36).substr(2, 9), productId: p.id, productName: p.name, field: 'stock', oldValue: p.stock, newValue: newStock, timestamp }, ...l].slice(0, 100));
+      if (p.id === productId) {
+        const newStock = Math.max(0, p.stock + diff);
         return { ...p, stock: newStock };
       }
       return p;
     }));
   };
 
-  const handleUpdateProduct = (updated: Product) => setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
-  const handleDeleteProduct = (id: string) => setProducts(prev => prev.filter(p => p.id !== id));
-  const handleDeleteMultipleProducts = (ids: string[]) => setProducts(prev => prev.filter(p => !ids.includes(p.id)));
-  const handleAddProduct = (p: Product) => setProducts(prev => [...prev, p]);
+  const handleBatchUpdateStock = (productIds: string[], amount: number) => {
+    setProducts(prev => prev.map(p => {
+      if (productIds.includes(p.id)) {
+        const newStock = Math.max(0, p.stock + amount);
+        addLog(p.id, p.name, 'batch_stock', p.stock, newStock);
+        return { ...p, stock: newStock };
+      }
+      return p;
+    }));
+  };
+
+  const handleUpdateProduct = (updated: Product) => {
+    setProducts(prev => prev.map(p => {
+      if (p.id === updated.id) {
+        if (p.price !== updated.price) addLog(p.id, p.name, 'price', p.price, updated.price);
+        if (p.stock !== updated.stock) addLog(p.id, p.name, 'stock', p.stock, updated.stock);
+        return updated;
+      }
+      return p;
+    }));
+  };
+
+  const handleDeleteProduct = (id: string) => {
+    const product = products.find(p => p.id === id);
+    if (product) addLog(id, product.name, 'status', 'active', 'deleted');
+    setProducts(prev => prev.filter(p => p.id !== id));
+  };
+
+  const handleDeleteMultipleProducts = (ids: string[]) => {
+    ids.forEach(id => {
+      const product = products.find(p => p.id === id);
+      if (product) addLog(id, product.name, 'status', 'active', 'deleted');
+    });
+    setProducts(prev => prev.filter(p => !ids.includes(p.id)));
+  };
+
+  const handleAddProduct = (p: Product) => {
+    addLog(p.id, p.name, 'status', 'none', 'created');
+    setProducts(prev => [...prev, p]);
+  };
 
   if (!isLoggedIn) return <LandingView lang={lang} setLang={setLang} onLogin={handleLogin} />;
 

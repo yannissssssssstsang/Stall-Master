@@ -251,16 +251,16 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                   ))}
                 </div>
 
-                {/* QR Code Display Logic */}
+                {/* QR Code Display Logic - Enlarged */}
                 {selectedPayment && selectedPayment !== 'CASH' && customQRCodes[selectedPayment] && (
-                  <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 flex flex-col items-center gap-4 animate-scale-in">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{t.scanToPay}</p>
-                    <div className="w-48 h-48 bg-white p-4 rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex items-center justify-center">
-                      <img src={customQRCodes[selectedPayment]} className="max-w-full max-h-full object-contain" alt="Payment QR" />
+                  <div className="bg-slate-50 p-8 rounded-[40px] border border-slate-100 flex flex-col items-center gap-6 animate-scale-in">
+                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.scanToPay}</p>
+                    <div className="w-full max-w-[320px] aspect-square bg-white p-6 rounded-[48px] shadow-lg border border-slate-200 overflow-hidden flex items-center justify-center transition-all hover:scale-[1.02]">
+                      <img src={customQRCodes[selectedPayment]} className="w-full h-full object-contain" alt="Payment QR" />
                     </div>
-                    <div className="flex items-center gap-2 px-4 py-2 bg-blue-600/10 rounded-full">
-                      <i className="fas fa-mobile-screen text-blue-600 text-xs"></i>
-                      <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest">{selectedPayment}</span>
+                    <div className="flex items-center gap-3 px-6 py-2.5 bg-blue-600 text-white rounded-full shadow-md shadow-blue-100">
+                      <i className="fas fa-mobile-screen text-xs"></i>
+                      <span className="text-[11px] font-black uppercase tracking-widest">{selectedPayment}</span>
                     </div>
                   </div>
                 )}

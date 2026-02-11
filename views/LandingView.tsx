@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Language } from '../types';
 
 interface LandingViewProps {
@@ -30,10 +30,10 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
           </div>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           <button 
             onClick={onLogin}
-            className="w-full bg-slate-900 text-white p-6 rounded-[28px] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-4 group"
+            className="w-full bg-slate-900 text-white p-6 rounded-[28px] font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-slate-200 transition-all active:scale-95 flex items-center justify-center gap-4 group hover:bg-slate-800"
           >
             <div className="w-6 h-6 flex items-center justify-center">
                <svg viewBox="0 0 24 24" className="w-full h-full">
@@ -59,13 +59,6 @@ const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => 
               : 'Your data (inventory, sales) is stored privately in your own Google Drive. We never access your personal files or store your customer data on our servers.'}
           </p>
         </div>
-
-        <button 
-          onClick={() => window.location.reload()}
-          className="text-[9px] font-black uppercase text-slate-300 tracking-[0.3em] hover:text-slate-500 transition-colors"
-        >
-          {lang === Language.ZH ? '重新整理頁面' : 'Refresh Application'}
-        </button>
       </div>
     </div>
   );

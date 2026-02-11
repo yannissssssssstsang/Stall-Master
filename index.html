@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,6 +33,17 @@
             border-radius: 1rem;
             z-index: 1;
         }
+        
+        /* LEAFLET CSS FIXES */
+        .leaflet-container img {
+            max-width: none !important;
+            max-height: none !important;
+        }
+        .leaflet-control-zoom {
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1) !important;
+        }
+
         .sync-pulse {
             animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }

@@ -29,9 +29,9 @@ export interface ProductChangeLog {
   id: string;
   productId: string;
   productName: string;
-  field: 'price' | 'stock';
-  oldValue: number;
-  newValue: number;
+  field: 'price' | 'stock' | 'status' | 'batch_stock';
+  oldValue: string | number;
+  newValue: string | number;
   timestamp: string;
 }
 

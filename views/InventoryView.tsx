@@ -94,7 +94,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     setDriveError(null);
     const result = await listDriveFiles();
     if (result.error) setDriveError(result.error);
-    setDriveFiles(result.files);
+    setDriveFiles(result.files || []);
     setIsLoadingDrive(false);
   };
 
@@ -137,8 +137,10 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       } else {
         if (f.mimeType?.includes('image/')) {
           if (f.data) imageBatch.push({ name: f.name, data: f.data });
-        } else if (f.blob) {
-          dataBatch.push({ name: f.name, blob: f.blob });
+        } else if (f.blob || f.data) {
+          // Spreadsheet from Drive
+          const blob = f.blob || (f.data ? await (await fetch(f.data)).blob() : null);
+          if (blob) dataBatch.push({ name: f.name, blob: blob });
         }
       }
     }
@@ -207,6 +209,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       }
     }
     setIsProcessing(false);
+    setShowAddMenu(false);
   };
 
   const handleLocalUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -320,6 +323,27 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     return 'fa-file';
   };
 
+  const getLogIcon = (field: ProductChangeLog['field']) => {
+    switch(field) {
+      case 'price': return 'fa-tag';
+      case 'stock': return 'fa-box-open';
+      case 'batch_stock': return 'fa-boxes-stacked';
+      case 'status': return 'fa-circle-info';
+      default: return 'fa-history';
+    }
+  };
+
+  const getLogColor = (log: ProductChangeLog) => {
+    if (log.field === 'status') {
+      if (log.newValue === 'created') return 'bg-emerald-50 text-emerald-500';
+      if (log.newValue === 'deleted') return 'bg-red-50 text-red-500';
+    }
+    if (log.field === 'price' || log.field === 'stock' || log.field === 'batch_stock') {
+      return (Number(log.newValue) > Number(log.oldValue)) ? 'bg-blue-50 text-blue-500' : 'bg-amber-50 text-amber-500';
+    }
+    return 'bg-slate-50 text-slate-500';
+  };
+
   return (
     <div className="space-y-6 pb-24 md:pb-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -370,15 +394,24 @@ const InventoryView: React.FC<InventoryViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-scale-in" onClick={e => e.stopPropagation()}>
           <button onClick={() => localInputRef.current?.click()} className="flex flex-col items-center justify-center gap-3 p-8 bg-white border border-slate-100 rounded-[32px] hover:bg-slate-50 transition-all shadow-sm group">
             <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fas fa-laptop-code text-2xl"></i></div>
-            <p className="font-black text-slate-800 uppercase tracking-wider text-[11px]">Local Drive</p>
+            <div>
+              <p className="font-black text-slate-800 uppercase tracking-wider text-[11px] mb-1">Local Drive</p>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Excel / CSV / Images</p>
+            </div>
           </button>
           <button onClick={() => setShowDrivePicker(true)} className="flex flex-col items-center justify-center gap-3 p-8 bg-white border border-slate-100 rounded-[32px] hover:bg-slate-50 transition-all shadow-sm group">
             <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fab fa-google-drive text-2xl"></i></div>
-            <p className="font-black text-slate-800 uppercase tracking-wider text-[11px]">Google Drive</p>
+            <div>
+              <p className="font-black text-slate-800 uppercase tracking-wider text-[11px] mb-1">Google Drive</p>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Excel / CSV / Images</p>
+            </div>
           </button>
           <button onClick={() => { setEditingProduct({ id: Math.random().toString(36).substr(2, 9), name: '', price: 0, cost: 0, stock: 0, category: '' }); setShowAddMenu(false); }} className="flex flex-col items-center justify-center gap-3 p-8 bg-white border border-slate-100 rounded-[32px] hover:bg-slate-50 transition-all shadow-sm group">
             <div className="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><i className="fas fa-keyboard text-2xl"></i></div>
-            <p className="font-black text-slate-800 uppercase tracking-wider text-[11px]">Manual Entry</p>
+            <div>
+              <p className="font-black text-slate-800 uppercase tracking-wider text-[11px] mb-1">Manual Entry</p>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Quick Single Item</p>
+            </div>
           </button>
         </div>
       )}
@@ -486,8 +519,39 @@ const InventoryView: React.FC<InventoryViewProps> = ({
       {showHistory && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-end md:items-center justify-center p-4" onClick={() => setShowHistory(false)}>
           <div className="bg-white w-full max-w-lg rounded-[48px] p-8 shadow-2xl animate-scale-in max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6 shrink-0"><h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{t.history}</h3><button onClick={() => setShowHistory(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button></div>
-            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-3">{changeLogs.length > 0 ? changeLogs.map(log => <div key={log.id} className="p-4 bg-slate-50 border border-slate-100 rounded-3xl flex items-start gap-4"><div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${log.field === 'price' ? 'bg-blue-50 text-blue-500' : 'bg-amber-50 text-amber-500'}`}><i className={`fas ${log.field === 'price' ? 'fa-tag' : 'fa-box-open'} text-xs`}></i></div><div className="flex-1 min-w-0"><div className="flex justify-between items-start mb-1"><p className="text-sm font-black text-slate-800 truncate uppercase tracking-tight">{log.productName}</p><span className="text-[9px] font-bold text-slate-400 uppercase ml-2">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div><div className="flex items-center gap-2"><span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{log.field === 'price' ? t.priceModified : t.stockModified}</span><div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-0.5 rounded-lg"><span className="text-[10px] font-bold text-slate-400">{log.oldValue}</span><i className="fas fa-arrow-right text-[8px] text-slate-300"></i><span className={`text-[10px] font-black ${log.newValue > log.oldValue ? 'text-emerald-500' : 'text-red-500'}`}>{log.newValue}</span></div></div></div></div>) : <div className="text-center py-20 opacity-30"><i className="fas fa-clock-rotate-left text-5xl mb-4"></i><p className="font-black uppercase tracking-widest text-xs">No edit history</p></div>}</div>
+            <div className="flex justify-between items-center mb-6 shrink-0"><h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Inventory History</h3><button onClick={() => setShowHistory(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button></div>
+            <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-3">
+              {changeLogs.length > 0 ? changeLogs.map(log => (
+                <div key={log.id} className="p-4 bg-slate-50 border border-slate-100 rounded-3xl flex items-start gap-4">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${getLogColor(log)}`}>
+                    <i className={`fas ${getLogIcon(log.field)} text-xs`}></i>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-start mb-1">
+                      <p className="text-sm font-black text-slate-800 truncate uppercase tracking-tight">{log.productName}</p>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase ml-2">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                        {log.field === 'status' ? (log.newValue === 'created' ? 'Created' : 'Deleted') : log.field.replace('_', ' ')}
+                      </span>
+                      {log.field !== 'status' && (
+                        <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2 py-0.5 rounded-lg">
+                          <span className="text-[10px] font-bold text-slate-400">{log.oldValue}</span>
+                          <i className="fas fa-arrow-right text-[8px] text-slate-300"></i>
+                          <span className={`text-[10px] font-black ${Number(log.newValue) > Number(log.oldValue) ? 'text-emerald-500' : 'text-red-500'}`}>{log.newValue}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-20 opacity-30">
+                  <i className="fas fa-clock-rotate-left text-5xl mb-4"></i>
+                  <p className="font-black uppercase tracking-widest text-xs">No edit history</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
