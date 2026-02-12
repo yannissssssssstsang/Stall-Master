@@ -48,7 +48,9 @@ export const TRANSLATIONS = {
     notifStock: 'Stock Less Than Threshold (Low Stock)',
     notifBoth: 'Both Records & Stock Alerts',
     transactionCount: 'Total Transactions',
-    newCustomers: 'New Customers'
+    newCustomers: 'New Customers',
+    cashReceived: 'Cash Received',
+    changeDue: 'Change Due'
   },
   [Language.ZH]: {
     appName: '揸流攤',
@@ -95,7 +97,9 @@ export const TRANSLATIONS = {
     notifStock: '庫存低於預警值 (15% 警報)',
     notifBoth: '交易記錄及庫存警報',
     transactionCount: '交易總數',
-    newCustomers: '新客數量'
+    newCustomers: '新客數量',
+    cashReceived: '實收現金',
+    changeDue: '應找回'
   }
 };
 

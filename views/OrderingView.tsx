@@ -14,7 +14,7 @@ interface OrderingViewProps {
 }
 
 const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteSale, updateStock, customQRCodes = {}, receiptConfig }) => {
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] as any;
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<string | null>(null);
@@ -30,6 +30,9 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isLocationLocked, setIsLocationLocked] = useState(false);
+
+  // Cash calculator state
+  const [cashReceived, setCashReceived] = useState<string>('');
 
   useEffect(() => {
     let watchId: number | null = null;
@@ -89,6 +92,11 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
   const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const cartProfit = cart.reduce((acc, item) => acc + ((item.price - item.cost) * item.quantity), 0);
 
+  const changeDue = useMemo(() => {
+    const received = parseFloat(cashReceived) || 0;
+    return Math.max(0, received - cartTotal);
+  }, [cashReceived, cartTotal]);
+
   const finalizeTransaction = async (emailSent: boolean = false) => {
     if (emailSent && !validateEmail(customerEmail)) return;
     setApiError(null);
@@ -140,6 +148,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
     setIsEmailSent(false);
     setApiError(null);
     setCurrentCoords(null);
+    setCashReceived('');
   };
 
   const groupedProducts = useMemo(() => {
@@ -216,7 +225,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
           <div className="bg-white w-full max-w-lg rounded-[48px] p-6 md:p-8 shadow-2xl animate-scale-in max-h-[95vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{showReceiptChoice ? 'Record Status' : 'Order Summary'}</h3>
-              <button onClick={() => setIsCheckoutOpen(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
+              <button onClick={() => { setIsCheckoutOpen(false); setCashReceived(''); }} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button>
             </div>
 
             {!showReceiptChoice ? (
@@ -251,6 +260,44 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                   ))}
                 </div>
 
+                {/* Cash Calculator Logic */}
+                {selectedPayment === 'CASH' && (
+                  <div className="bg-slate-50 p-6 rounded-[32px] border border-slate-100 space-y-4 animate-scale-in">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.cashReceived}</span>
+                      <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm">
+                        <span className="text-slate-400 font-bold">$</span>
+                        <input 
+                          type="number" 
+                          value={cashReceived} 
+                          onChange={(e) => setCashReceived(e.target.value)}
+                          placeholder="0"
+                          className="w-20 bg-transparent outline-none font-black text-slate-800 text-right"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {[10, 20, 50, 100, 500, 1000].map(amt => (
+                        <button 
+                          key={amt} 
+                          onClick={() => setCashReceived(amt.toString())}
+                          className="py-2 px-1 bg-white border border-slate-200 rounded-xl text-[10px] font-black text-slate-500 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all active:scale-95"
+                        >
+                          ${amt}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{t.changeDue}</span>
+                      <span className={`text-xl font-black ${changeDue > 0 ? 'text-emerald-600' : 'text-slate-300'}`}>
+                        ${changeDue.toFixed(1)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* QR Code Display Logic - Enlarged */}
                 {selectedPayment && selectedPayment !== 'CASH' && customQRCodes[selectedPayment] && (
                   <div className="bg-slate-50 p-8 rounded-[40px] border border-slate-100 flex flex-col items-center gap-6 animate-scale-in">
@@ -265,7 +312,7 @@ const OrderingView: React.FC<OrderingViewProps> = ({ products, lang, onCompleteS
                   </div>
                 )}
 
-                <button onClick={() => setShowReceiptChoice(true)} disabled={!selectedPayment} className="w-full bg-emerald-600 text-white p-6 rounded-[24px] font-black uppercase tracking-widest shadow-xl disabled:opacity-50">
+                <button onClick={() => setShowReceiptChoice(true)} disabled={!selectedPayment} className="w-full bg-emerald-600 text-white p-6 rounded-[24px] font-black uppercase tracking-widest shadow-xl disabled:opacity-50 transition-all active:scale-[0.98]">
                   {t.confirmPayment}
                 </button>
               </div>

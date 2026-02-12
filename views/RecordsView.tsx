@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Transaction, Language } from '../types';
 import { TRANSLATIONS } from '../constants';
 
@@ -8,22 +8,34 @@ interface RecordsViewProps {
   lang: Language;
 }
 
+type DateRange = 'today' | 'all';
+
 const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] as any;
+  const [range, setRange] = useState<DateRange>('today');
+
+  const filteredTransactions = useMemo(() => {
+    if (range === 'all') return transactions;
+    
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    
+    return transactions.filter(tx => new Date(tx.timestamp).getTime() >= startOfToday);
+  }, [transactions, range]);
 
   const sortedTransactions = useMemo(() => 
-    [...transactions].sort((a, b) => 
+    [...filteredTransactions].sort((a, b) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    ), [transactions]
+    ), [filteredTransactions]
   );
 
   const paymentSummary = useMemo(() => {
     const summary: Record<string, number> = {};
-    transactions.forEach(tx => {
+    filteredTransactions.forEach(tx => {
       summary[tx.paymentMethod] = (summary[tx.paymentMethod] || 0) + tx.total;
     });
     return Object.entries(summary).sort((a, b) => b[1] - a[1]);
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   const getMethodIcon = (method: string) => {
     switch (method.toUpperCase()) {
@@ -67,15 +79,30 @@ const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
 
   return (
     <div className="space-y-8 pb-20 md:pb-8">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-black text-slate-800 tracking-tight">{t.records}</h2>
           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Transaction Log & History</p>
         </div>
+
+        <div className="bg-white p-1.5 rounded-[20px] border border-slate-100 shadow-sm flex items-center gap-1">
+          <button 
+            onClick={() => setRange('today')}
+            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'today' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            {lang === Language.ZH ? '今日' : 'Today'}
+          </button>
+          <button 
+            onClick={() => setRange('all')}
+            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'all' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
+          >
+            {lang === Language.ZH ? '全部' : 'All Time'}
+          </button>
+        </div>
       </div>
 
       {/* Payment Method Summary Section */}
-      {paymentSummary.length > 0 && (
+      {paymentSummary.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-scale-in">
           {paymentSummary.map(([method, amount]) => (
             <div key={method} className={`p-4 rounded-[24px] border shadow-sm ${getMethodBgLite(method)} flex flex-col gap-2`}>
@@ -92,10 +119,16 @@ const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
             </div>
           ))}
         </div>
-      )}
+      ) : range === 'today' && transactions.length > 0 ? (
+        <div className="p-8 bg-slate-50 border border-slate-100 rounded-[32px] text-center">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">No transactions yet today</p>
+        </div>
+      ) : null}
 
       <div className="space-y-4">
-        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">Recent Transactions</h3>
+        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] ml-1">
+          {range === 'today' ? 'Today\'s Transactions' : 'Recent Transactions'}
+        </h3>
         {sortedTransactions.map((tx) => (
           <div key={tx.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4 hover:shadow-md transition-shadow group">
             <div className="flex justify-between items-start">
@@ -155,12 +188,14 @@ const RecordsView: React.FC<RecordsViewProps> = ({ transactions, lang }) => {
           </div>
         ))}
 
-        {transactions.length === 0 && (
+        {sortedTransactions.length === 0 && (
           <div className="text-center py-32 bg-white rounded-[40px] border border-dashed border-slate-200">
             <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-6">
               <i className="fas fa-receipt text-slate-200 text-4xl"></i>
             </div>
-            <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-xs">{t.noRecords}</p>
+            <p className="text-slate-400 font-black uppercase tracking-[0.2em] text-xs">
+              {range === 'today' ? 'No transactions today' : t.noRecords}
+            </p>
           </div>
         )}
       </div>

@@ -344,6 +344,15 @@ const InventoryView: React.FC<InventoryViewProps> = ({
     return 'bg-slate-50 text-slate-500';
   };
 
+  const formatLogTimestamp = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${year}${month}${day} ${time}`;
+  };
+
   return (
     <div className="space-y-6 pb-24 md:pb-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -494,7 +503,7 @@ const InventoryView: React.FC<InventoryViewProps> = ({
 
       {showBatchModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4" onClick={() => setShowBatchModal(false)}>
-          <div className="bg-white w-full max-w-sm rounded-[40px] p-8 shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
+          <div className="bg-white w-full max-sm rounded-[40px] p-8 shadow-2xl animate-scale-in" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6"><div><h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Batch Stock</h3><p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Updating {selectedIds.length} items</p></div><button onClick={() => setShowBatchModal(false)} className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center text-slate-400"><i className="fas fa-times"></i></button></div>
             <div className="space-y-6">
               <div className="text-center"><p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Enter quantity to adjust</p><div className="flex items-center justify-center gap-4"><button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) - 1))} className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 active:scale-90 transition-all"><i className="fas fa-minus"></i></button><input type="number" value={batchAmount} onChange={e => setBatchAmount(e.target.value)} className="w-24 p-4 bg-slate-50 border border-slate-100 rounded-[20px] text-center text-xl font-black text-blue-600 outline-none focus:border-blue-500 shadow-inner" /><button onClick={() => setBatchAmount(prev => String((parseInt(prev) || 0) + 1))} className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 active:scale-90 transition-all"><i className="fas fa-plus"></i></button></div></div>
@@ -529,7 +538,9 @@ const InventoryView: React.FC<InventoryViewProps> = ({
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-start mb-1">
                       <p className="text-sm font-black text-slate-800 truncate uppercase tracking-tight">{log.productName}</p>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase ml-2">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase ml-2 whitespace-nowrap">
+                        {formatLogTimestamp(log.timestamp)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
