@@ -39,12 +39,24 @@ export interface CartItem extends Product {
   quantity: number;
 }
 
+export interface Refund {
+  id: string;
+  timestamp: string;
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  amount: number;
+  profitImpact: number;
+  reason: string;
+  method: string;
+}
+
 export interface Transaction {
   id: string;
   timestamp: string;
   items: CartItem[];
   total: number;
-  paymentMethod: string; // Changed from enum to string to support custom methods
+  paymentMethod: string;
   profit: number;
   customerEmail?: string;
   location?: {
@@ -52,6 +64,7 @@ export interface Transaction {
     lng: number;
     name?: string;
   };
+  refunds?: Refund[];
 }
 
 export interface ReceiptConfig {
@@ -61,6 +74,12 @@ export interface ReceiptConfig {
   address: string;
   phone: string;
   email: string;
+}
+
+export interface SettlementConfig {
+  enabled: boolean;
+  time: string; // HH:mm format
+  lastSettledDate?: string; // YYYY-MM-DD
 }
 
 export interface DailyReport {
@@ -78,7 +97,7 @@ export interface AIExtractionResult {
 }
 
 export interface PaymentQRCodes {
-  [key: string]: string | undefined; // Flexible keys for custom methods
+  [key: string]: string | undefined;
 }
 
 export interface TelegramConfig {

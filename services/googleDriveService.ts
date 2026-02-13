@@ -14,6 +14,7 @@ export interface SyncData {
     paymentQRCodes: any;
     receiptConfig: any;
     changeLogs: any[];
+    settlementConfig: any;
   };
 }
 
@@ -37,6 +38,7 @@ const getAccessToken = () => {
 };
 
 const CLOUD_FOLDER_NAME = 'StallMate_Cloud_Data';
+const SETTLEMENTS_FOLDER_NAME = 'Settlements';
 
 /**
  * Verifies if the Google Drive API is accessible with current token.
@@ -70,6 +72,99 @@ export const verifyGoogleConnection = async (): Promise<ConnectionStatus> => {
   }
 };
 
+const findFile = async (token: string, query: string): Promise<string | null> => {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  });
+  if (resp.status === 401) throw new Error('UNAUTHORIZED');
+  if (!resp.ok) return null;
+  const data = await resp.json();
+  return data.files?.length > 0 ? data.files[0].id : null;
+};
+
+const getOrCreateFolder = async (token: string, folderName: string, parentId?: string): Promise<string> => {
+  const headers = { 'Authorization': `Bearer ${token}` };
+  let query = `name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+  if (parentId) query += ` and '${parentId}' in parents`;
+  
+  let folderId = await findFile(token, query);
+  
+  if (!folderId) {
+    const body: any = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+    };
+    if (parentId) body.parents = [parentId];
+
+    const createFolderResp = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!createFolderResp.ok) throw new Error('FOLDER_CREATION_FAILED');
+    const folderData = await createFolderResp.json();
+    folderId = folderData.id;
+  }
+  return folderId!;
+};
+
+/**
+ * Uploads a binary settlement file to a sub-folder in Drive using multipart/related.
+ */
+export const uploadSettlementToDrive = async (fileName: string, blob: Blob): Promise<SyncResult> => {
+  const token = getAccessToken();
+  if (!token) return { success: false, error: 'NO_TOKEN' };
+
+  try {
+    const rootFolderId = await getOrCreateFolder(token, CLOUD_FOLDER_NAME);
+    const settlementsFolderId = await getOrCreateFolder(token, SETTLEMENTS_FOLDER_NAME, rootFolderId);
+
+    const metadata = {
+      name: fileName,
+      parents: [settlementsFolderId],
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    };
+
+    const boundary = 'StallMate_Multipart_Boundary';
+    
+    // Construct headers for the multipart request
+    const metadataPart = 
+      `--${boundary}\r\n` +
+      `Content-Type: application/json; charset=UTF-8\r\n\r\n` +
+      `${JSON.stringify(metadata)}\r\n`;
+    
+    const mediaPartHeader = 
+      `--${boundary}\r\n` +
+      `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n`;
+    
+    const mediaPartFooter = `\r\n--${boundary}--`;
+
+    // Create the final multipart Blob
+    const multipartBlob = new Blob([metadataPart, mediaPartHeader, blob, mediaPartFooter], { 
+      type: `multipart/related; boundary=${boundary}` 
+    });
+
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      method: 'POST',
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`
+      },
+      body: multipartBlob
+    });
+
+    if (!response.ok) {
+      const errData = await response.json();
+      throw new Error(errData.error?.message || 'UPLOAD_FAILED');
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Settlement Upload Error:", error);
+    return { success: false, error: error.message };
+  }
+};
+
 /**
  * Full cloud synchronization: Saves Inventory and Settings to Drive.
  */
@@ -78,31 +173,14 @@ export const syncToGoogleDrive = async (data: SyncData): Promise<SyncResult> => 
   if (!token) return { success: false, error: 'NO_TOKEN' };
 
   try {
-    const headers = { 'Authorization': `Bearer ${token}` };
+    const folderId = await getOrCreateFolder(token, CLOUD_FOLDER_NAME);
 
-    // 1. Get or Create Main Application Folder
-    let folderId = await findFile(token, `name = '${CLOUD_FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`);
-    
-    if (!folderId) {
-      const createFolderResp = await fetch('https://www.googleapis.com/drive/v3/files', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: CLOUD_FOLDER_NAME,
-          mimeType: 'application/vnd.google-apps.folder',
-        })
-      });
-      if (!createFolderResp.ok) throw new Error('FOLDER_CREATION_FAILED');
-      const folderData = await createFolderResp.json();
-      folderId = folderData.id;
-    }
-
-    // 2. Parallel upload of all data registries (Inventory includes item images, Settings includes logo/card)
+    // 2. Parallel upload of all data registries
     await Promise.all([
-      updateOrCreateFile(token, folderId!, "inventory.json", data.products),
-      updateOrCreateFile(token, folderId!, "transactions.json", data.transactions),
-      updateOrCreateFile(token, folderId!, "daily_reports.json", data.reports),
-      updateOrCreateFile(token, folderId!, "settings.json", data.settings)
+      updateOrCreateFile(token, folderId, "inventory.json", data.products),
+      updateOrCreateFile(token, folderId, "transactions.json", data.transactions),
+      updateOrCreateFile(token, folderId, "daily_reports.json", data.reports),
+      updateOrCreateFile(token, folderId, "settings.json", data.settings)
     ]);
 
     return { success: true };
@@ -143,7 +221,8 @@ export const downloadFromGoogleDrive = async (): Promise<{ success: boolean; dat
           telegramConfig: { botToken: '', chatId: '', alertType: 'both' },
           paymentQRCodes: {},
           receiptConfig: { companyName: '', address: '', phone: '', email: '' },
-          changeLogs: []
+          changeLogs: [],
+          settlementConfig: { enabled: false, time: '22:00' }
         }
       }
     };
@@ -151,16 +230,6 @@ export const downloadFromGoogleDrive = async (): Promise<{ success: boolean; dat
     console.error("Cloud Retrieval Error:", error);
     return { success: false, error: error.message };
   }
-};
-
-const findFile = async (token: string, query: string): Promise<string | null> => {
-  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name)`, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  if (resp.status === 401) throw new Error('UNAUTHORIZED');
-  if (!resp.ok) return null;
-  const data = await resp.json();
-  return data.files?.length > 0 ? data.files[0].id : null;
 };
 
 const getFileContent = async (token: string, folderId: string, fileName: string): Promise<any> => {

@@ -1,6 +1,6 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Language, PaymentQRCodes, TelegramConfig, ReceiptConfig } from '../types';
+import { Language, PaymentQRCodes, TelegramConfig, ReceiptConfig, SettlementConfig } from '../types';
 import { TRANSLATIONS } from '../constants';
 import { verifyGoogleConnection, ConnectionStatus, listDriveFiles, getDriveFileAsBase64 } from '../services/googleDriveService';
 import { extractBusinessCardInfo } from '../services/geminiService';
@@ -19,6 +19,9 @@ interface SettingsViewProps {
   onUpdateReceiptConfig: (config: ReceiptConfig) => void;
   onForceDownload: () => Promise<void>;
   lastSyncTime?: string | null;
+  settlementConfig: SettlementConfig;
+  onUpdateSettlementConfig: (config: SettlementConfig) => void;
+  onManualSettle: () => void;
 }
 
 interface HKMethod {
@@ -73,9 +76,12 @@ const SettingsView: React.FC<SettingsViewProps> = ({
   receiptConfig,
   onUpdateReceiptConfig,
   onForceDownload,
-  lastSyncTime
+  lastSyncTime,
+  settlementConfig,
+  onUpdateSettlementConfig,
+  onManualSettle
 }) => {
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] as any;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modalFileInputRef = useRef<HTMLInputElement>(null);
   const brandingInputRef = useRef<HTMLInputElement>(null);
@@ -170,24 +176,6 @@ const SettingsView: React.FC<SettingsViewProps> = ({
     setIsCustomMode(false);
   };
 
-  const runTelegramTest = async () => {
-    if (!telegramConfig.botToken || !telegramConfig.chatId) {
-      setErrorMessage(lang === Language.ZH ? '請先填寫 Token 和 ID' : 'Please fill Token & ID first');
-      setTestStatus('error');
-      return;
-    }
-    setTestStatus('loading');
-    setErrorMessage(null);
-    try {
-      await onTestTelegram();
-      setTestStatus('success');
-      setTimeout(() => setTestStatus('idle'), 3000);
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Connection failed');
-      setTestStatus('error');
-    }
-  };
-
   const handleSaveAll = async () => {
     setIsSavedLocally(true);
     await onForceSync();
@@ -235,6 +223,53 @@ const SettingsView: React.FC<SettingsViewProps> = ({
           {isSyncing ? <i className="fas fa-sync fa-spin"></i> : <i className={`fas ${isSavedLocally ? 'fa-check' : 'fa-save'}`}></i>}
           {isSyncing ? 'Syncing...' : (isSavedLocally ? 'Saved & Synced' : 'Save & Sync All')}
         </button>
+      </div>
+
+      {/* Daily Settlement Section */}
+      <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 space-y-6">
+        <div className="flex justify-between items-center">
+          <div>
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest">{t.dailySettlement}</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{t.settlementDescription}</p>
+          </div>
+          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+            <i className="fas fa-file-excel"></i>
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row gap-6 items-center">
+          <div className="flex-1 w-full space-y-4">
+            <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+               <span className="text-xs font-black text-slate-500 uppercase tracking-tight">{t.enableAutoSettlement}</span>
+               <button 
+                onClick={() => onUpdateSettlementConfig({...settlementConfig, enabled: !settlementConfig.enabled})}
+                className={`w-12 h-6 rounded-full transition-colors relative ${settlementConfig.enabled ? 'bg-blue-600' : 'bg-slate-200'}`}
+               >
+                 <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${settlementConfig.enabled ? 'right-1' : 'left-1'}`}></div>
+               </button>
+            </div>
+            
+            <div className={`space-y-2 transition-opacity ${settlementConfig.enabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">{t.settlementTime}</label>
+              <input 
+                type="time" 
+                value={settlementConfig.time} 
+                onChange={e => onUpdateSettlementConfig({...settlementConfig, time: e.target.value})}
+                className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl text-sm font-black text-slate-800 outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="w-full md:w-auto">
+            <button 
+              onClick={onManualSettle}
+              className="w-full md:w-auto px-8 py-5 bg-slate-800 text-white rounded-[24px] font-black uppercase text-[10px] tracking-widest flex items-center justify-center gap-3 shadow-xl shadow-slate-200 active:scale-95 transition-all"
+            >
+              <i className="fas fa-file-export"></i>
+              {t.settleNow}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-100 space-y-6">
@@ -408,7 +443,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({
 
       {isAddingNewMethod && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[200] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-[48px] p-8 shadow-2xl">
+          <div className="bg-white w-full max-md rounded-[48px] p-8 shadow-2xl">
             <h3 className="text-xl font-black mb-6 uppercase">New Payment Method</h3>
             {!isCustomMode ? (
               <div className="space-y-2">

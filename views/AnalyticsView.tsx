@@ -30,8 +30,20 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     return transactions.filter(tx => new Date(tx.timestamp).getTime() >= startOfToday);
   }, [transactions, range]);
 
-  const totalRevenue = filteredTransactions.reduce((acc, curr) => acc + curr.total, 0);
-  const totalProfit = filteredTransactions.reduce((acc, curr) => acc + curr.profit, 0);
+  const effectiveTotals = useMemo(() => {
+    return filteredTransactions.map(tx => {
+      const refundTotal = (tx.refunds || []).reduce((acc, r) => acc + r.amount, 0);
+      const refundProfit = (tx.refunds || []).reduce((acc, r) => acc + r.profitImpact, 0);
+      return {
+        ...tx,
+        effectiveTotal: tx.total - refundTotal,
+        effectiveProfit: tx.profit - refundProfit
+      };
+    });
+  }, [filteredTransactions]);
+
+  const totalRevenue = effectiveTotals.reduce((acc, curr) => acc + curr.effectiveTotal, 0);
+  const totalProfit = effectiveTotals.reduce((acc, curr) => acc + curr.effectiveProfit, 0);
 
   const newCustomersCount = useMemo(() => {
     const emails = filteredTransactions
@@ -42,7 +54,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
 
   const locationStats = useMemo(() => {
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
-    filteredTransactions.forEach(tx => {
+    effectiveTotals.forEach(tx => {
       if (tx.location) {
         // Rounding to 5 decimal places for stable grouping (~1m precision)
         const key = `${tx.location.lat.toFixed(5)},${tx.location.lng.toFixed(5)}`;
@@ -55,12 +67,12 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
             name: tx.location.name || 'Unnamed Stall' 
           };
         }
-        stats[key].revenue += tx.total;
+        stats[key].revenue += tx.effectiveTotal;
         stats[key].count += 1;
       }
     });
     return Object.values(stats);
-  }, [filteredTransactions]);
+  }, [effectiveTotals]);
 
   const maxRevenue = useMemo(() => {
     return Math.max(...locationStats.map(s => s.revenue), 1);
@@ -68,21 +80,27 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
 
   const hourlyData = useMemo(() => {
     const map: Record<number, number> = {};
-    filteredTransactions.forEach(tx => {
+    effectiveTotals.forEach(tx => {
       const hour = new Date(tx.timestamp).getHours();
-      map[hour] = (map[hour] || 0) + tx.total;
+      map[hour] = (map[hour] || 0) + tx.effectiveTotal;
     });
     return Array.from({ length: 24 }, (_, i) => ({
       hour: `${i.toString().padStart(2, '0')}:00`,
       amount: map[i] || 0
     }));
-  }, [filteredTransactions]);
+  }, [effectiveTotals]);
 
   const bestSellers = useMemo(() => {
     const productSalesMap: Record<string, number> = {};
     filteredTransactions.forEach(tx => {
       tx.items.forEach(item => {
-        productSalesMap[item.name] = (productSalesMap[item.name] || 0) + item.quantity;
+        const refundedQty = (tx.refunds || [])
+          .filter(r => r.itemId === item.id)
+          .reduce((acc, r) => acc + r.quantity, 0);
+        const netQty = item.quantity - refundedQty;
+        if (netQty > 0) {
+          productSalesMap[item.name] = (productSalesMap[item.name] || 0) + netQty;
+        }
       });
     });
     return Object.entries(productSalesMap)
@@ -151,7 +169,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
       });
 
       locationStats.forEach(stat => {
-        const radius = 8 + (Math.sqrt(stat.revenue / maxRevenue) * 25);
+        const radius = 8 + (Math.sqrt(Math.max(0, stat.revenue) / maxRevenue) * 25);
         
         const bubble = L.circleMarker([stat.lat, stat.lng], {
           radius: radius,
@@ -259,10 +277,10 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           </div>
         </div>
         <div className="dashboard-card p-6 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Sales</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Active Sales</p>
           <div>
-            <p className="text-3xl font-black text-slate-800">{filteredTransactions.length}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Confirmed Transactions</p>
+            <p className="text-3xl font-black text-slate-800">{filteredTransactions.filter(tx => (tx.total - (tx.refunds || []).reduce((a,b)=>a+b.amount,0)) > 0).length}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Net Transactions</p>
           </div>
         </div>
         <div className="dashboard-card p-6 flex flex-col justify-between">
@@ -281,7 +299,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <div className="p-4 px-6 border-b border-slate-50 flex justify-between items-center bg-white shrink-0 z-10">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Transaction Density Map</h3>
-              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Spatial concentration of sales</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Spatial concentration of net sales</p>
             </div>
             <div className="flex gap-2">
               <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
@@ -300,46 +318,65 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           </div>
         </div>
 
+        {/* REDESIGNED BEST SELLERS FOR TABLET RESPONSIVENESS */}
         <div className="dashboard-card p-6 lg:col-span-4 h-[500px] flex flex-col">
           <div className="flex justify-between items-center mb-8 shrink-0">
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">{t.bestSellers}</h3>
-            <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500">
+            <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
               <i className="fas fa-crown text-sm"></i>
             </div>
           </div>
-          <div className="flex-1 min-h-0">
+          
+          <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-6">
             {bestSellers.length > 0 ? (
-              <div className="h-full flex flex-col">
-                <div className="flex-1 min-h-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={bestSellers} layout="vertical" margin={{ left: 0, right: 30 }}>
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" fontSize={10} width={100} axisLine={false} tickLine={false} tick={{fill: '#64748b', fontWeight: 800}} />
-                      <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', fontWeight: 'bold' }} />
-                      <Bar dataKey="count" radius={[0, 12, 12, 0]} barSize={32}>
-                        {bestSellers.map((_, index) => <Cell key={index} fill={['#2563eb', '#3b82f6', '#60a5fa', '#93c5fa', '#bfdbfe'][index % 5]} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-6 pt-6 border-t border-slate-50 space-y-4">
-                  {bestSellers.slice(0, 3).map((item, i) => (
-                    <div key={i} className="flex justify-between items-center">
+              bestSellers.map((item, i) => {
+                const maxCount = Math.max(...bestSellers.map(b => b.count), 1);
+                const percentage = (item.count / maxCount) * 100;
+                const colors = ['bg-blue-600', 'bg-blue-500', 'bg-blue-400', 'bg-blue-300', 'bg-blue-200'];
+                
+                return (
+                  <div key={i} className="group relative">
+                    <div className="flex justify-between items-end mb-2">
                       <div className="flex items-center gap-3">
-                        <span className="text-xs font-black text-slate-300">#0{i+1}</span>
-                        <span className="text-sm font-bold text-slate-700">{item.name}</span>
+                        <span className="text-[10px] font-black text-slate-300 uppercase">#0{i+1}</span>
+                        <span className="text-sm font-black text-slate-800 uppercase tracking-tight truncate max-w-[140px] md:max-w-full">
+                          {item.name}
+                        </span>
                       </div>
-                      <span className="text-xs font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg">{item.count} Sold</span>
+                      
+                      {/* TOOLTIP: ONLY SHOWS COUNT */}
+                      <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 absolute right-0 -top-6 bg-slate-900 text-white px-3 py-1 rounded-xl text-[10px] font-black z-20 shadow-xl pointer-events-none transform -translate-y-1">
+                        {item.count} Sold
+                      </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    
+                    <div className="relative h-2.5 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-50">
+                      <div 
+                        className={`absolute inset-y-0 left-0 ${colors[i % colors.length]} rounded-full transition-all duration-1000 ease-out`}
+                        style={{ width: `${percentage}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                );
+              })
             ) : (
-              <div className="flex flex-col items-center justify-center h-full text-slate-300">
-                 <i className="fas fa-chart-pie text-5xl mb-4 opacity-10"></i>
+              <div className="flex flex-col items-center justify-center h-full text-slate-300 opacity-40">
+                 <i className="fas fa-chart-pie text-5xl mb-4"></i>
                  <p className="font-bold uppercase tracking-widest text-[10px]">No sales recorded</p>
               </div>
             )}
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-slate-50 shrink-0">
+             <div className="flex items-center gap-2 mb-2">
+                <i className="fas fa-lightbulb text-amber-400 text-[10px]"></i>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Strategy Insight</p>
+             </div>
+             <p className="text-[11px] font-bold text-slate-500 leading-relaxed">
+               {bestSellers.length > 0 
+                 ? `Focus promotion on ${bestSellers[0].name} to leverage its existing ${bestSellers[0].count} unit momentum.`
+                 : 'Sales patterns will appear here once transactions are recorded.'}
+             </p>
           </div>
         </div>
 
@@ -348,7 +385,7 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Revenue Velocity</h3>
               <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                {range === 'today' ? 'Real-time hourly breakdown' : 'Historical aggregate by hour'}
+                {range === 'today' ? 'Real-time hourly breakdown (Net)' : 'Historical aggregate by hour (Net)'}
               </p>
             </div>
             <div className="flex items-center gap-4">
