@@ -11,9 +11,9 @@ interface LandingViewProps {
 const LandingView: React.FC<LandingViewProps> = ({ onLogin, lang, setLang }) => {
   return (
     <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6 relative overflow-hidden text-slate-900">
-      {/* Background Accents */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-50 rounded-full blur-[120px] opacity-60"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-50 rounded-full blur-[120px] opacity-40"></div>
+      {/* Background Accents - THEME COLOR #0088CC */}
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#0088CC] rounded-full blur-[120px] opacity-10"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#0088CC] rounded-full blur-[120px] opacity-5"></div>
 
       <div className="max-w-md w-full text-center space-y-12 z-10">
         <div className="flex flex-col items-center gap-6">

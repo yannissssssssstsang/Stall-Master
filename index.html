@@ -12,7 +12,31 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        :root {
+            --primary-theme: #0088CC;
+            --primary-theme-hover: #0077BB;
+            --primary-theme-light: #EBF5FB;
+            --primary-theme-border: #AED6F1;
+            --primary-theme-shadow: rgba(0, 136, 204, 0.2);
+        }
+
         body { font-family: 'Inter', sans-serif; transition: background-color 0.3s ease; }
+        
+        /* THEME OVERRIDES */
+        .bg-blue-600 { background-color: var(--primary-theme) !important; }
+        .hover\:bg-blue-700:hover { background-color: var(--primary-theme-hover) !important; }
+        .text-blue-600 { color: var(--primary-theme) !important; }
+        .text-blue-500 { color: var(--primary-theme) !important; }
+        .bg-blue-50 { background-color: var(--primary-theme-light) !important; }
+        .border-blue-600 { border-color: var(--primary-theme) !important; }
+        .border-blue-100 { border-color: var(--primary-theme-border) !important; }
+        .border-blue-200 { border-color: var(--primary-theme-border) !important; }
+        .shadow-blue-100, .shadow-blue-200, .shadow-blue-500\/20 { 
+            box-shadow: 0 10px 15px -3px var(--primary-theme-shadow), 0 4px 6px -4px var(--primary-theme-shadow) !important; 
+        }
+        .bg-blue-500 { background-color: var(--primary-theme) !important; }
+
         .animate-scale-in {
             animation: scaleIn 0.2s ease-out;
         }
@@ -45,26 +69,26 @@
         }
 
         .sync-pulse {
-            animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            animation: pulse-theme 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
-        @keyframes pulse-blue {
+        @keyframes pulse-theme {
             0%, 100% { opacity: 1; }
             50% { opacity: .5; }
         }
 
         /* DARK MODE UI REPLACEMENT - ENHANCED CONTRAST */
         .dark-mode {
-            background-color: #020617 !important; /* Deepest blue/slate (950) */
-            color: #f8fafc !important; /* slate-50 */
+            background-color: #020617 !important; 
+            color: #f8fafc !important; 
         }
         .dark-mode .bg-white, 
         .dark-mode .bg-slate-50, 
         .dark-mode .bg-slate-100 {
-            background-color: #0f172a !important; /* Primary surface (slate-900) */
-            border-color: #1e293b !important; /* slate-800 */
+            background-color: #0f172a !important; 
+            border-color: #1e293b !important; 
         }
         .dark-mode .bg-slate-200, .dark-mode .bg-slate-300 {
-            background-color: #1e293b !important; /* Elevated surface (slate-800) */
+            background-color: #1e293b !important; 
         }
         .dark-mode .text-slate-800, 
         .dark-mode .text-slate-900, 
@@ -74,7 +98,7 @@
         .dark-mode .text-slate-400, 
         .dark-mode .text-slate-500,
         .dark-mode .text-slate-600 {
-            color: #cbd5e1 !important; /* Brighter secondary text (slate-300) for contrast */
+            color: #cbd5e1 !important; 
         }
         .dark-mode .dashboard-card {
             background: #0f172a !important;
@@ -92,12 +116,12 @@
             color: #f8fafc !important;
         }
         /* Specific accent fixes for dark mode */
-        .dark-mode .bg-blue-50 { background-color: rgba(37, 99, 235, 0.15) !important; }
+        .dark-mode .bg-blue-50 { background-color: rgba(0, 136, 204, 0.15) !important; }
         .dark-mode .bg-emerald-50 { background-color: rgba(5, 150, 105, 0.15) !important; }
         .dark-mode .bg-red-50 { background-color: rgba(220, 38, 38, 0.15) !important; }
         .dark-mode .bg-amber-50 { background-color: rgba(217, 119, 6, 0.15) !important; }
         
-        .dark-mode .text-blue-600 { color: #60a5fa !important; }
+        .dark-mode .text-blue-600 { color: #5DADE2 !important; }
         .dark-mode .text-emerald-600 { color: #34d399 !important; }
         .dark-mode .text-red-600 { color: #f87171 !important; }
         .dark-mode .text-amber-600 { color: #fbbf24 !important; }
@@ -111,7 +135,7 @@
             box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.6) !important;
         }
 
-        /* Leaflet Dark Theme adjustment - Improved */
+        /* Leaflet Dark Theme adjustment */
         .dark-mode #analytics-map {
             filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(110%);
         }

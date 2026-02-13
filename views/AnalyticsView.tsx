@@ -13,11 +13,13 @@ interface AnalyticsViewProps {
 }
 
 type DateRange = 'today' | 'all';
+type SummaryMode = 'item' | 'category';
 
 const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, products }) => {
   const t = TRANSLATIONS[lang] as any;
   const mapRef = useRef<any>(null);
   const [range, setRange] = useState<DateRange>('today');
+  const [summaryMode, setSummaryMode] = useState<SummaryMode>('item');
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
 
   // Filtering transactions based on range
@@ -45,18 +47,45 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
   const totalRevenue = effectiveTotals.reduce((acc, curr) => acc + curr.effectiveTotal, 0);
   const totalProfit = effectiveTotals.reduce((acc, curr) => acc + curr.effectiveProfit, 0);
 
-  const newCustomersCount = useMemo(() => {
-    const emails = filteredTransactions
-      .map(tx => tx.customerEmail)
-      .filter(email => email && email.trim() !== '');
-    return new Set(emails).size;
+  const totalRefundCount = useMemo(() => {
+    return filteredTransactions.reduce((acc, tx) => acc + (tx.refunds?.length || 0), 0);
   }, [filteredTransactions]);
+
+  // Comprehensive Product Mix Calculation
+  const productMixData = useMemo(() => {
+    const summary: Record<string, { label: string; units: number; revenue: number; refundedUnits: number }> = {};
+
+    filteredTransactions.forEach(tx => {
+      tx.items.forEach(item => {
+        const key = summaryMode === 'item' ? item.id : (item.category || (lang === Language.ZH ? '未分類' : 'Uncategorized'));
+        const label = summaryMode === 'item' ? item.name : (item.category || (lang === Language.ZH ? '未分類' : 'Uncategorized'));
+
+        if (!summary[key]) {
+          summary[key] = { label, units: 0, revenue: 0, refundedUnits: 0 };
+        }
+
+        const refundedQty = (tx.refunds || [])
+          .filter(r => r.itemId === item.id)
+          .reduce((acc, r) => acc + r.quantity, 0);
+        
+        const netQty = item.quantity - refundedQty;
+        
+        // Accumulate gross and refunds separately for display
+        summary[key].units += netQty;
+        summary[key].refundedUnits += refundedQty;
+        summary[key].revenue += (item.price * netQty);
+      });
+    });
+
+    return Object.values(summary)
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 8); // Top 8 for the summary list
+  }, [filteredTransactions, summaryMode, lang]);
 
   const locationStats = useMemo(() => {
     const stats: Record<string, { lat: number; lng: number; revenue: number; count: number; name: string }> = {};
     effectiveTotals.forEach(tx => {
       if (tx.location) {
-        // Rounding to 5 decimal places for stable grouping (~1m precision)
         const key = `${tx.location.lat.toFixed(5)},${tx.location.lng.toFixed(5)}`;
         if (!stats[key]) {
           stats[key] = { 
@@ -124,12 +153,8 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
     const container = document.getElementById('analytics-map');
     if (!container) return;
 
-    const isMapOperational = () => {
-      return mapRef.current && container.isConnected;
-    };
-
     if (!mapRef.current) {
-      let initialCenter: [number, number] = [22.3193, 114.1694]; // Default to HK
+      let initialCenter: [number, number] = [22.3193, 114.1694];
       if (locationStats.length > 0) {
         initialCenter = [locationStats[0].lat, locationStats[0].lng];
       } else if (userLoc) {
@@ -148,29 +173,24 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         }).addTo(mapInstance);
         
         L.control.zoom({ position: 'bottomright' }).addTo(mapInstance);
-        
         mapRef.current = mapInstance;
       } catch (err) {
         console.error("Leaflet initialization failed", err);
       }
     }
 
-    if (isMapOperational()) {
+    if (mapRef.current) {
       const map = mapRef.current;
-      
-      // Delay invalidateSize to account for dashboard card transitions (0.3s)
       const resizeTimer = setTimeout(() => {
-        if (isMapOperational()) map.invalidateSize();
+        if (map) map.invalidateSize();
       }, 400);
 
-      // Clear existing markers
       map.eachLayer((layer: any) => { 
         if (layer instanceof L.CircleMarker) map.removeLayer(layer); 
       });
 
       locationStats.forEach(stat => {
         const radius = 8 + (Math.sqrt(Math.max(0, stat.revenue) / maxRevenue) * 25);
-        
         const bubble = L.circleMarker([stat.lat, stat.lng], {
           radius: radius,
           fillColor: '#3b82f6',
@@ -189,49 +209,10 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
             <p class="text-[10px] text-slate-500 font-bold uppercase tracking-tight">${stat.count} Transactions</p>
           </div>
         `, { closeButton: false, className: 'custom-map-popup' });
-
-        bubble.on('mouseover', function (this: any) {
-          this.setStyle({ fillOpacity: 0.9, weight: 3, fillColor: '#2563eb' });
-          this.openPopup();
-        });
-        bubble.on('mouseout', function (this: any) {
-          this.setStyle({ fillOpacity: 0.7, weight: 2, fillColor: '#3b82f6' });
-        });
       });
 
-      const updateView = () => {
-        if (!isMapOperational()) return;
-        if (locationStats.length > 0) {
-          const bounds = locationStats.map(s => [s.lat, s.lng] as [number, number]);
-          try {
-            if (locationStats.length === 1) {
-              map.setView(bounds[0], 16, { animate: true });
-            } else {
-              map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-            }
-          } catch (e) {
-            console.warn("View update failed", e);
-          }
-        } else if (userLoc) {
-          map.panTo([userLoc.lat, userLoc.lng]);
-        }
-      };
-
-      requestAnimationFrame(updateView);
       return () => clearTimeout(resizeTimer);
     }
-
-    return () => {
-      if (mapRef.current) {
-        try {
-          mapRef.current.off();
-          mapRef.current.remove();
-        } catch (e) {
-          console.warn("Map cleanup error", e);
-        }
-        mapRef.current = null;
-      }
-    };
   }, [locationStats, maxRevenue, userLoc, range]);
 
   return (
@@ -243,140 +224,123 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
         </div>
         
         <div className="bg-white p-1.5 rounded-[20px] border border-slate-100 shadow-sm flex items-center gap-1">
-          <button 
-            onClick={() => setRange('today')}
-            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'today' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
-          >
-            {lang === Language.ZH ? '今日' : 'Today'}
-          </button>
-          <button 
-            onClick={() => setRange('all')}
-            className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'all' ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}
-          >
-            {lang === Language.ZH ? '全部' : 'All Time'}
-          </button>
+          <button onClick={() => setRange('today')} className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'today' ? 'bg-[#494D5F] text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}>{lang === Language.ZH ? '今日' : 'Today'}</button>
+          <button onClick={() => setRange('all')} className={`px-6 py-2 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all ${range === 'all' ? 'bg-[#494D5F] text-white shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}>{lang === Language.ZH ? '全部' : 'All Time'}</button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <div className="dashboard-card p-6 bg-blue-600 text-white border-0 shadow-lg shadow-blue-100 flex flex-col justify-between">
+        <div className="dashboard-card p-6 bg-[#494D5F] text-white border-0 shadow-lg flex flex-col justify-between">
           <p className="text-[10px] font-bold opacity-80 uppercase tracking-widest mb-1">{t.revenue}</p>
-          <div>
-            <p className="text-3xl font-black">${totalRevenue.toLocaleString()}</p>
-            <div className="flex items-center gap-1 mt-1 text-white/70 text-[10px] font-bold uppercase">
-              <i className="fas fa-chart-line"></i>
-              <span>{range === 'today' ? 'Real-time sync' : 'Historical Total'}</span>
-            </div>
-          </div>
+          <p className="text-3xl font-black">${totalRevenue.toLocaleString()}</p>
         </div>
         <div className="dashboard-card p-6 border-l-4 border-l-emerald-500 flex flex-col justify-between">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.profit}</p>
-          <div>
-            <p className="text-3xl font-black text-slate-800">${totalProfit.toLocaleString()}</p>
-            <p className="text-[10px] font-bold text-emerald-600 uppercase mt-1">Margin: {totalRevenue > 0 ? ((totalProfit/totalRevenue)*100).toFixed(1) : 0}%</p>
-          </div>
+          <p className="text-3xl font-black text-slate-800">${totalProfit.toLocaleString()}</p>
         </div>
         <div className="dashboard-card p-6 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Active Sales</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Net Sales</p>
+          <p className="text-3xl font-black text-slate-800">{filteredTransactions.length}</p>
+        </div>
+        <div className="dashboard-card p-6 flex flex-col justify-between border-l-4 border-l-red-400">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.refundCount}</p>
+          <p className="text-3xl font-black text-red-600">{totalRefundCount}</p>
+        </div>
+      </div>
+
+      {/* Product Mix Summary Section */}
+      <div className="dashboard-card p-6 md:p-8 space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <p className="text-3xl font-black text-slate-800">{filteredTransactions.filter(tx => (tx.total - (tx.refunds || []).reduce((a,b)=>a+b.amount,0)) > 0).length}</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Net Transactions</p>
+            <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Product Mix Summary</h3>
+            <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Distribution of net sales volume</p>
+          </div>
+          <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1">
+            <button 
+              onClick={() => setSummaryMode('item')}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${summaryMode === 'item' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+            >
+              {lang === Language.ZH ? '按單品' : 'By Item'}
+            </button>
+            <button 
+              onClick={() => setSummaryMode('category')}
+              className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${summaryMode === 'category' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-400'}`}
+            >
+              {lang === Language.ZH ? '按分類' : 'By Category'}
+            </button>
           </div>
         </div>
-        <div className="dashboard-card p-6 flex flex-col justify-between">
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{t.newCustomers}</p>
-          <div>
-            <p className="text-3xl font-black text-blue-600">{newCustomersCount}</p>
-            <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
-               <div className="bg-blue-600 h-full rounded-full" style={{ width: `${Math.min(100, (newCustomersCount / Math.max(1, filteredTransactions.length)) * 100)}%` }}></div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {productMixData.length > 0 ? productMixData.map((item, idx) => {
+            const maxUnits = Math.max(...productMixData.map(d => d.units), 1);
+            const progress = (item.units / maxUnits) * 100;
+            return (
+              <div key={idx} className="space-y-3 p-4 bg-slate-50 rounded-[24px] border border-slate-100 transition-all hover:border-blue-200 group">
+                <div className="flex justify-between items-start">
+                  <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight truncate max-w-[70%]">{item.label}</span>
+                  <div className="flex flex-col items-end">
+                    <span className="text-[10px] font-black text-blue-600">{item.units} Qty</span>
+                    {item.refundedUnits > 0 && (
+                      <span className="text-[8px] font-black text-red-500 italic mt-0.5 whitespace-nowrap">
+                        (-{item.refundedUnits} refunded)
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="h-2 w-full bg-white rounded-full overflow-hidden border border-slate-200">
+                  <div 
+                    className="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-out group-hover:bg-blue-600"
+                    style={{ width: `${progress}%` }}
+                  ></div>
+                </div>
+                <div className="flex justify-between items-center opacity-60">
+                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Revenue</span>
+                  <span className="text-[10px] font-bold text-slate-700">${item.revenue.toFixed(1)}</span>
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="col-span-full py-12 text-center opacity-30">
+               <i className="fas fa-layer-group text-4xl mb-3"></i>
+               <p className="text-[10px] font-black uppercase tracking-widest">No data available for this range</p>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="dashboard-card overflow-hidden lg:col-span-8 h-[500px] flex flex-col group">
+        <div className="dashboard-card overflow-hidden lg:col-span-8 h-[500px] flex flex-col">
           <div className="p-4 px-6 border-b border-slate-50 flex justify-between items-center bg-white shrink-0 z-10">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Transaction Density Map</h3>
               <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">Spatial concentration of net sales</p>
             </div>
-            <div className="flex gap-2">
-              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span className="text-[9px] font-bold text-slate-500 uppercase">Revenue Volume</span>
-              </div>
-            </div>
           </div>
-          <div className="flex-1 min-h-[300px] relative bg-slate-50">
-            <div id="analytics-map" className="h-full w-full grayscale-[0.2] contrast-[1.1]"></div>
-            {locationStats.length === 0 && !userLoc && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white/50 backdrop-blur-[2px] z-10">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-white px-4 py-2 rounded-full shadow-sm">Acquiring Location Context...</p>
-              </div>
-            )}
+          <div className="flex-1 relative bg-slate-50">
+            <div id="analytics-map" className="h-full w-full"></div>
           </div>
         </div>
 
-        {/* REDESIGNED BEST SELLERS FOR TABLET RESPONSIVENESS */}
         <div className="dashboard-card p-6 lg:col-span-4 h-[500px] flex flex-col">
           <div className="flex justify-between items-center mb-8 shrink-0">
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">{t.bestSellers}</h3>
-            <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500 shadow-sm">
+            <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-500">
               <i className="fas fa-crown text-sm"></i>
             </div>
           </div>
-          
           <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-6">
-            {bestSellers.length > 0 ? (
-              bestSellers.map((item, i) => {
-                const maxCount = Math.max(...bestSellers.map(b => b.count), 1);
-                const percentage = (item.count / maxCount) * 100;
-                const colors = ['bg-blue-600', 'bg-blue-500', 'bg-blue-400', 'bg-blue-300', 'bg-blue-200'];
-                
-                return (
-                  <div key={i} className="group relative">
-                    <div className="flex justify-between items-end mb-2">
-                      <div className="flex items-center gap-3">
-                        <span className="text-[10px] font-black text-slate-300 uppercase">#0{i+1}</span>
-                        <span className="text-sm font-black text-slate-800 uppercase tracking-tight truncate max-w-[140px] md:max-w-full">
-                          {item.name}
-                        </span>
-                      </div>
-                      
-                      {/* TOOLTIP: ONLY SHOWS COUNT */}
-                      <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 absolute right-0 -top-6 bg-slate-900 text-white px-3 py-1 rounded-xl text-[10px] font-black z-20 shadow-xl pointer-events-none transform -translate-y-1">
-                        {item.count} Sold
-                      </div>
-                    </div>
-                    
-                    <div className="relative h-2.5 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-50">
-                      <div 
-                        className={`absolute inset-y-0 left-0 ${colors[i % colors.length]} rounded-full transition-all duration-1000 ease-out`}
-                        style={{ width: `${percentage}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-slate-300 opacity-40">
-                 <i className="fas fa-chart-pie text-5xl mb-4"></i>
-                 <p className="font-bold uppercase tracking-widest text-[10px]">No sales recorded</p>
+            {bestSellers.length > 0 ? bestSellers.map((item, i) => (
+              <div key={i} className="group relative">
+                <div className="flex justify-between items-end mb-2">
+                  <span className="text-sm font-black text-slate-800 uppercase tracking-tight">{item.name}</span>
+                  <span className="text-[10px] font-black text-blue-600">{item.count} Sold</span>
+                </div>
+                <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(item.count / Math.max(...bestSellers.map(b => b.count))) * 100}%` }}></div>
+                </div>
               </div>
-            )}
-          </div>
-
-          <div className="mt-8 pt-6 border-t border-slate-50 shrink-0">
-             <div className="flex items-center gap-2 mb-2">
-                <i className="fas fa-lightbulb text-amber-400 text-[10px]"></i>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Strategy Insight</p>
-             </div>
-             <p className="text-[11px] font-bold text-slate-500 leading-relaxed">
-               {bestSellers.length > 0 
-                 ? `Focus promotion on ${bestSellers[0].name} to leverage its existing ${bestSellers[0].count} unit momentum.`
-                 : 'Sales patterns will appear here once transactions are recorded.'}
-             </p>
+            )) : <p className="text-center py-20 opacity-30 text-xs uppercase font-black">No records</p>}
           </div>
         </div>
 
@@ -384,18 +348,10 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
           <div className="flex justify-between items-center mb-8 shrink-0">
             <div>
               <h3 className="text-xs font-black text-slate-800 uppercase tracking-[0.2em]">Revenue Velocity</h3>
-              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">
-                {range === 'today' ? 'Real-time hourly breakdown (Net)' : 'Historical aggregate by hour (Net)'}
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]"></span>
-                <span className="text-[10px] font-black text-slate-400 tracking-widest uppercase">Intraday Sales ($)</span>
-              </div>
+              <p className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">{range === 'today' ? 'Real-time hourly breakdown' : 'Historical aggregate by hour'}</p>
             </div>
           </div>
-          <div className="flex-1 min-h-0">
+          <div className="flex-1">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={hourlyData}>
                 <defs>
@@ -404,31 +360,10 @@ const AnalyticsView: React.FC<AnalyticsViewProps> = ({ transactions, lang, produ
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
-                <XAxis 
-                  dataKey="hour" 
-                  fontSize={10} 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{fill: '#94a3b8', fontWeight: 800}} 
-                  padding={{ left: 20, right: 20 }}
-                />
-                <YAxis 
-                  hide={true}
-                  domain={['auto', 'auto']}
-                />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)', padding: '12px 16px' }} 
-                  itemStyle={{ fontWeight: 'black', color: '#1e40af' }}
-                />
-                <Area 
-                  type="monotone" 
-                  dataKey="amount" 
-                  stroke="#3b82f6" 
-                  strokeWidth={5} 
-                  fillOpacity={1} 
-                  fill="url(#colorRevenue)" 
-                  animationDuration={2000}
-                />
+                <XAxis dataKey="hour" fontSize={10} axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontWeight: 800}} />
+                <YAxis hide={true} domain={['auto', 'auto']} />
+                <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }} />
+                <Area type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={5} fill="url(#colorRevenue)" animationDuration={2000} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
